@@ -20,23 +20,23 @@ namespace TheDawn
             {
                 Name = "Temperate Forest",
                 TemperatureOffset = 0f,
-                BerryBushes = 70,
-                Trees = 280,
-                FlintRocks = 26,
-                DeerHerds = 4,
-                BoarGroups = 2,
-                WolfPacks = 2
+                BerryBushes = 900,
+                Trees = 3500,
+                FlintRocks = 220,
+                DeerHerds = 14,
+                BoarGroups = 7,
+                WolfPacks = 4
             };
         }
     }
 
-    /// <summary>Procedural home region: heightmap terrain, water, resources.</summary>
+    /// <summary>Procedural home region (1 km x 1 km): heightmap terrain, a river, lakes, resources.</summary>
     public class World : MonoBehaviour
     {
         public static World Instance { get; private set; }
 
-        public float Size = 240f;
-        public float CellSize = 2f;
+        public float Size = 1000f;
+        public float CellSize = 4f;   // 251x251 vertices stays under the 65k-vertex mesh limit
         public float WaterLevel = 2f;
         public Biome Biome;
 
@@ -44,9 +44,14 @@ namespace TheDawn
         float[,] heights;
         Texture2D colorMap;
         Material terrainMat;
+        public Texture2D MiniMap { get; private set; }
         public Vector3 StartPoint { get; private set; }
+        public Collider TerrainCollider { get; private set; }
 
         public float HalfSize { get { return Size * 0.5f; } }
+
+        // River centreline: z = riverZ + A1 sin(x f1 + p1) + A2 sin(x f2 + p2)
+        float riverZ, rA1, rF1, rP1, rA2, rF2, rP2;
 
         void Awake() { Instance = this; }
 
@@ -58,15 +63,34 @@ namespace TheDawn
             heights = new float[res, res];
 
             float ox = Random.Range(0f, 1000f), oz = Random.Range(0f, 1000f);
-            Vector2 lake = new Vector2(Random.Range(-50f, 50f), Random.Range(-50f, 50f));
-            float lakeR = Random.Range(18f, 28f);
+            float bx = Random.Range(0f, 1000f), bz = Random.Range(0f, 1000f);
+
+            riverZ = Random.Range(-0.3f, 0.3f) * HalfSize;
+            rA1 = Random.Range(50f, 90f); rF1 = Mathf.PI * 2f / Random.Range(600f, 900f); rP1 = Random.Range(0f, 6.28f);
+            rA2 = Random.Range(12f, 28f); rF2 = Mathf.PI * 2f / Random.Range(140f, 220f); rP2 = Random.Range(0f, 6.28f);
+
+            var lakes = new List<Vector3>(); // x, z, radius
+            for (int attempt = 0; attempt < 200 && lakes.Count < 2; attempt++)
+            {
+                Vector2 c = new Vector2(Random.Range(-0.65f, 0.65f), Random.Range(-0.65f, 0.65f)) * HalfSize;
+                // Keep lakes off the river and apart from each other.
+                if (Mathf.Abs(c.y - RiverZAt(c.x)) < 110f) continue;
+                bool tooClose = false;
+                foreach (var l in lakes) if (Vector2.Distance(c, new Vector2(l.x, l.y)) < 300f) tooClose = true;
+                if (tooClose) continue;
+                lakes.Add(new Vector3(c.x, c.y, Random.Range(35f, 65f)));
+            }
 
             for (int z = 0; z < res; z++)
             {
                 for (int x = 0; x < res; x++)
                 {
                     float wx = x * CellSize - HalfSize, wz = z * CellSize - HalfSize;
-                    float h = 0f, amp = 1f, freq = 0.012f, norm = 0f;
+
+                    // Broad hills and valleys...
+                    float broad = Mathf.PerlinNoise(bx + wx * 0.0025f, bz + wz * 0.0025f);
+                    // ...with smaller rolling detail on top.
+                    float h = 0f, amp = 1f, freq = 0.008f, norm = 0f;
                     for (int o = 0; o < 4; o++)
                     {
                         h += Mathf.PerlinNoise(ox + wx * freq, oz + wz * freq) * amp;
@@ -75,16 +99,31 @@ namespace TheDawn
                         freq *= 2.1f;
                     }
                     h /= norm;
-                    float height = 3f + h * 11f;
+                    float height = 3.5f + broad * 16f + h * 9f;
 
-                    // Hills toward the edges frame the valley.
+                    // Hills toward the edges frame the region.
                     float edge = Mathf.Max(Mathf.Abs(wx), Mathf.Abs(wz)) / HalfSize;
-                    height += Mathf.SmoothStep(0f, 1f, (edge - 0.7f) / 0.3f) * 14f;
+                    height += Mathf.SmoothStep(0f, 1f, (edge - 0.82f) / 0.18f) * 28f;
 
-                    // A lake.
-                    float d = Vector2.Distance(new Vector2(wx, wz), lake);
-                    if (d < lakeR * 1.6f)
-                        height -= Mathf.SmoothStep(0f, 1f, 1f - d / (lakeR * 1.6f)) * 7f;
+                    // Lakes
+                    foreach (var l in lakes)
+                    {
+                        // Noise on the distance gives an irregular shoreline.
+                        float d = Vector2.Distance(new Vector2(wx, wz), new Vector2(l.x, l.y));
+                        d *= 0.7f + Mathf.PerlinNoise(ox + wx * 0.015f, oz + wz * 0.015f) * 0.6f;
+                        // Full depth inside the radius, sloping banks out to 1.6x.
+                        if (d < l.z * 1.6f)
+                            height = Mathf.Lerp(height, WaterLevel - 4f, Mathf.SmoothStep(0f, 1f, (l.z * 1.6f - d) / (l.z * 0.6f)));
+                    }
+
+                    // River: a channel below water level with sloping banks.
+                    float rd = RiverDistance(wx, wz);
+                    float halfWidth = 6f + Mathf.PerlinNoise(ox + wx * 0.01f, 7.3f) * 6f;
+                    if (rd < halfWidth * 3f)
+                    {
+                        float t = Mathf.Clamp01((rd - halfWidth) / (halfWidth * 2f));
+                        height = Mathf.Lerp(WaterLevel - 1.4f, height, Mathf.SmoothStep(0f, 1f, t));
+                    }
 
                     heights[x, z] = height;
                 }
@@ -94,22 +133,33 @@ namespace TheDawn
             BuildWater();
             RefreshColors(Season.Spring);
             SpawnResources();
-
-            // Start near the centre on dry, flat-ish ground.
             StartPoint = FindStartPoint();
+        }
+
+        float RiverZAt(float x)
+        {
+            return riverZ + rA1 * Mathf.Sin(x * rF1 + rP1) + rA2 * Mathf.Sin(x * rF2 + rP2);
+        }
+
+        float RiverDistance(float x, float z)
+        {
+            float slope = rA1 * rF1 * Mathf.Cos(x * rF1 + rP1) + rA2 * rF2 * Mathf.Cos(x * rF2 + rP2);
+            return Mathf.Abs(z - RiverZAt(x)) / Mathf.Sqrt(1f + slope * slope);
         }
 
         Vector3 FindStartPoint()
         {
             Vector3 best = Vector3.zero;
             float bestScore = float.MaxValue;
-            for (int i = 0; i < 300; i++)
+            for (int i = 0; i < 500; i++)
             {
-                Vector3 p = new Vector3(Random.Range(-40f, 40f), 0f, Random.Range(-40f, 40f));
+                Vector3 p = new Vector3(Random.Range(-140f, 140f), 0f, Random.Range(-140f, 140f));
                 float h = HeightAt(p);
-                if (h < WaterLevel + 1f) continue;
-                float slope = Slope(p);
-                float score = slope * 10f + p.magnitude * 0.05f;
+                if (h < WaterLevel + 1.2f) continue;
+                // Flat ground, not far from the river (fresh water), not right on its bank.
+                float rd = RiverDistance(p.x, p.z);
+                float waterScore = rd < 25f ? 30f : Mathf.Abs(rd - 60f) * 0.1f;
+                float score = Slope(p) * 40f + waterScore + p.magnitude * 0.02f;
                 if (score < bestScore) { bestScore = score; best = p; }
             }
             best.y = HeightAt(best);
@@ -146,17 +196,14 @@ namespace TheDawn
 
             var go = new GameObject("Terrain");
             go.transform.SetParent(transform, false);
-            go.layer = 0;
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             terrainMat = new Material(Visuals.LitShader);
             if (terrainMat.HasProperty("_Glossiness")) terrainMat.SetFloat("_Glossiness", 0f);
             if (terrainMat.HasProperty("_Smoothness")) terrainMat.SetFloat("_Smoothness", 0f);
             go.AddComponent<MeshRenderer>().sharedMaterial = terrainMat;
-            go.AddComponent<MeshCollider>().sharedMesh = mesh;
-            TerrainCollider = go.GetComponent<MeshCollider>();
+            TerrainCollider = go.AddComponent<MeshCollider>();
+            ((MeshCollider)TerrainCollider).sharedMesh = mesh;
         }
-
-        public Collider TerrainCollider { get; private set; }
 
         void BuildWater()
         {
@@ -176,12 +223,15 @@ namespace TheDawn
 
         public void RefreshColors(Season season)
         {
-            const int texRes = 128;
+            const int texRes = 512;
             if (colorMap == null)
             {
                 colorMap = new Texture2D(texRes, texRes, TextureFormat.RGB24, false);
                 colorMap.wrapMode = TextureWrapMode.Clamp;
                 colorMap.filterMode = FilterMode.Bilinear;
+                MiniMap = new Texture2D(texRes, texRes, TextureFormat.RGB24, false);
+                MiniMap.wrapMode = TextureWrapMode.Clamp;
+                MiniMap.filterMode = FilterMode.Bilinear;
             }
             Color grass;
             switch (season)
@@ -194,22 +244,28 @@ namespace TheDawn
             Color sand = new Color(0.62f, 0.56f, 0.42f);
             Color mud = new Color(0.3f, 0.26f, 0.2f);
             Color rock = new Color(0.42f, 0.41f, 0.4f);
+            Color water = season == Season.Winter ? new Color(0.55f, 0.65f, 0.72f) : new Color(0.2f, 0.36f, 0.48f);
             var px = new Color[texRes * texRes];
+            var mini = new Color[texRes * texRes];
             for (int z = 0; z < texRes; z++)
                 for (int x = 0; x < texRes; x++)
                 {
                     Vector3 p = new Vector3((x + 0.5f) / texRes * Size - HalfSize, 0f, (z + 0.5f) / texRes * Size - HalfSize);
                     float h = HeightAt(p);
                     float slope = Slope(p);
-                    float n = Mathf.PerlinNoise(p.x * 0.08f, p.z * 0.08f);
-                    Color c = Color.Lerp(grass, grass * 0.8f, n);
+                    float n = Mathf.PerlinNoise(p.x * 0.05f, p.z * 0.05f) * 0.6f + Mathf.PerlinNoise(p.x * 0.2f, p.z * 0.2f) * 0.4f;
+                    Color c = Color.Lerp(grass, grass * 0.78f, n);
                     if (h < WaterLevel + 0.2f) c = mud;
                     else if (h < WaterLevel + 0.9f) c = season == Season.Winter ? Color.Lerp(sand, grass, 0.6f) : sand;
                     if (slope > 0.55f) c = Color.Lerp(c, rock, Mathf.Clamp01((slope - 0.55f) * 3f));
-                    px[z * texRes + x] = c;
+                    int i = z * texRes + x;
+                    px[i] = c;
+                    mini[i] = h < WaterLevel ? water : c * (0.75f + Mathf.Clamp01((h - WaterLevel) / 40f) * 0.4f);
                 }
             colorMap.SetPixels(px);
             colorMap.Apply();
+            MiniMap.SetPixels(mini);
+            MiniMap.Apply();
             if (terrainMat != null)
             {
                 terrainMat.mainTexture = colorMap;
@@ -222,37 +278,44 @@ namespace TheDawn
             var parent = new GameObject("Resources").transform;
             parent.SetParent(transform, false);
 
+            // Forests: large patches with smaller clearings inside them.
             float fx = Random.Range(0f, 500f), fz = Random.Range(0f, 500f);
             int placed = 0, tries = 0;
-            while (placed < Biome.Trees && tries < Biome.Trees * 20)
+            while (placed < Biome.Trees && tries < Biome.Trees * 25)
             {
                 tries++;
-                Vector3 p = RandomPoint(0.95f);
+                Vector3 p = RandomPoint(0.96f);
                 if (!IsLand(p, 0.6f) || Slope(p) > 0.7f) continue;
-                float forest = Mathf.PerlinNoise(fx + p.x * 0.02f, fz + p.z * 0.02f);
-                if (Random.value > forest * forest * 1.8f) continue;
+                float forest = Mathf.PerlinNoise(fx + p.x * 0.006f, fz + p.z * 0.006f) * 0.7f
+                             + Mathf.PerlinNoise(fx + p.x * 0.03f, fz + p.z * 0.03f) * 0.3f;
+                if (Random.value > forest * forest * 2f) continue;
                 ResourceNode.Create(ResourceType.Tree, p, parent);
                 placed++;
             }
 
+            // Berry bushes favour forest edges and clearings, spread through the valley.
             placed = 0; tries = 0;
-            while (placed < Biome.BerryBushes && tries < 5000)
+            while (placed < Biome.BerryBushes && tries < Biome.BerryBushes * 20)
             {
                 tries++;
-                Vector3 p = RandomPoint(0.85f);
+                Vector3 p = RandomPoint(0.9f);
                 if (!IsLand(p, 0.5f) || Slope(p) > 0.5f) continue;
+                float forest = Mathf.PerlinNoise(fx + p.x * 0.006f, fz + p.z * 0.006f);
+                if (Random.value > 1f - Mathf.Abs(forest - 0.5f) * 1.4f) continue;
                 ResourceNode.Create(ResourceType.BerryBush, p, parent);
                 placed++;
             }
 
+            // Flint shows up on slopes and along water.
             placed = 0; tries = 0;
-            while (placed < Biome.FlintRocks && tries < 5000)
+            while (placed < Biome.FlintRocks && tries < Biome.FlintRocks * 40)
             {
                 tries++;
-                Vector3 p = RandomPoint(0.9f);
+                Vector3 p = RandomPoint(0.92f);
                 if (!IsLand(p, 0.3f)) continue;
-                // Flint shows up on slopes and near water.
-                if (Slope(p) < 0.25f && HeightAt(p) > WaterLevel + 2f && Random.value > 0.25f) continue;
+                bool rocky = Slope(p) > 0.25f;
+                bool shore = HeightAt(p) < WaterLevel + 1.5f;
+                if (!rocky && !shore && Random.value > 0.15f) continue;
                 ResourceNode.Create(ResourceType.FlintRock, p, parent);
                 placed++;
             }
@@ -324,6 +387,17 @@ namespace TheDawn
         {
             p.y = HeightAt(p);
             return p;
+        }
+
+        /// <summary>World position to 0..1 map coordinates (x right, y up/north).</summary>
+        public Vector2 ToMap(Vector3 p)
+        {
+            return new Vector2((p.x + HalfSize) / Size, (p.z + HalfSize) / Size);
+        }
+
+        public Vector3 FromMap(Vector2 uv)
+        {
+            return OnGround(new Vector3(uv.x * Size - HalfSize, 0f, uv.y * Size - HalfSize));
         }
     }
 }

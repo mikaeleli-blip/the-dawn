@@ -270,7 +270,7 @@ namespace TheDawn
                     if ((a.Position - Position).sqrMagnitude < 14f * 14f) { Startle(a.Position); return; }
                 }
             }
-            Wander(30f);
+            Wander(45f);
         }
 
         void UpdatePredator()
@@ -324,12 +324,15 @@ namespace TheDawn
                     }
                 }
                 // Give up a chase that runs too far from home.
-                if ((t - Group.Home).sqrMagnitude > 110f * 110f) Group.ClearTarget();
+                if ((t - Group.Home).sqrMagnitude > 320f * 320f) Group.ClearTarget();
                 return;
             }
 
             state = State.Wander;
-            Wander(clock.IsNight ? 70f : 35f);
+            // Packs range further at night, and much further when winter makes them hungry.
+            float range = clock.Season == Season.Winter ? 170f : clock.IsNight ? 110f : 50f;
+            if (Group.Hunger > 70f) range += 50f;
+            Wander(range);
         }
     }
 }

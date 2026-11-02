@@ -468,7 +468,7 @@ namespace TheDawn
             return best;
         }
 
-        bool TryForage(float range = 70f)
+        bool TryForage(float range = 90f)
         {
             if (C.Season == Season.Winter && Random.value < 0.6f) return false;
             var n = FindNode(ResourceType.BerryBush, range, T.CampPosition);
@@ -482,7 +482,7 @@ namespace TheDawn
 
         bool TryGatherWood()
         {
-            var n = FindNode(ResourceType.Tree, 90f, T.CampPosition);
+            var n = FindNode(ResourceType.Tree, 120f, T.CampPosition);
             if (n == null) return false;
             StartJob(JobKind.Harvest, "Gathering wood");
             node = n; node.ReservedBy = this; CarryType = Res.Wood;
@@ -502,7 +502,7 @@ namespace TheDawn
             }
             if (flintNeed > woodNeed)
             {
-                var n = FindNode(ResourceType.FlintRock, 120f, T.CampPosition);
+                var n = FindNode(ResourceType.FlintRock, 220f, T.CampPosition);
                 if (n != null)
                 {
                     StartJob(JobKind.Harvest, "Collecting flint");
@@ -516,7 +516,7 @@ namespace TheDawn
         bool TryHunt()
         {
             Animal best = null;
-            float bestD = 140f * 140f;
+            float bestD = 230f * 230f;
             foreach (var a in Animal.All)
             {
                 if (!a.Alive || a.IsPredator) continue;
@@ -529,7 +529,7 @@ namespace TheDawn
             StartJob(JobKind.Hunt, "Hunting a " + best.SpeciesName.ToLower());
             prey = best;
             prey.ReservedBy = this;
-            timer = 70f; // give up after a while
+            timer = 130f; // give up after a while
             return true;
         }
 

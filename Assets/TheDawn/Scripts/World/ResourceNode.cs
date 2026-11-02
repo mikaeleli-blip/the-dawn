@@ -44,7 +44,8 @@ namespace TheDawn
                     Visuals.Part(PrimitiveType.Cylinder, visual.transform, new Vector3(0, 1.6f * s, 0), new Vector3(0.35f, 1.6f, 0.35f) * s, new Color(0.3f, 0.22f, 0.15f));
                     Color leaf = Random.value < 0.4f ? new Color(0.13f, 0.27f, 0.15f) : new Color(0.2f, 0.33f, 0.14f);
                     Visuals.Part(PrimitiveType.Sphere, visual.transform, new Vector3(0, 3.8f * s, 0), new Vector3(2.4f, 2.8f, 2.4f) * s, leaf);
-                    Visuals.Part(PrimitiveType.Sphere, visual.transform, new Vector3(0.5f, 3.2f * s, 0.3f), new Vector3(1.6f, 1.8f, 1.6f) * s, leaf * 0.9f);
+                    if (Random.value < 0.5f)
+                        Visuals.Part(PrimitiveType.Sphere, visual.transform, new Vector3(0.5f, 3.2f * s, 0.3f), new Vector3(1.6f, 1.8f, 1.6f) * s, leaf * 0.9f);
                     break;
                 case ResourceType.BerryBush:
                     Max = 6f;
@@ -52,7 +53,7 @@ namespace TheDawn
                     Visuals.Part(PrimitiveType.Sphere, visual.transform, new Vector3(0, 0.45f, 0), new Vector3(1.3f, 0.9f, 1.3f) * s, new Color(0.18f, 0.32f, 0.14f));
                     berries = new GameObject("Berries");
                     berries.transform.SetParent(visual.transform, false);
-                    for (int i = 0; i < 5; i++)
+                    for (int i = 0; i < 3; i++)
                     {
                         Vector3 bp = Random.onUnitSphere * 0.55f * s;
                         bp.y = Mathf.Abs(bp.y) * 0.6f + 0.45f;

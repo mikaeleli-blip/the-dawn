@@ -143,7 +143,9 @@ continues** (a wandering band or survivors from a neighbour take over).
 
 ## First playable slice (current build)
 
-- One temperate biome, procedural terrain.
+- One temperate biome: a procedural 1 km × 1 km valley with a river, two lakes,
+  forests and hills. About 3,500 trees, 900 berry bushes, 14 deer herds, 7 boar
+  groups and 4 wolf packs.
 - A nomadic band of 8 (adults, an elder, children). **Goal:** found a camp
   (place a Campfire), shelter everyone, and **survive the first winter**.
 - Foraging (seasonal berries), wood and flint gathering, food spoiling.
@@ -155,8 +157,8 @@ continues** (a wandering band or survivors from a neighbour take over).
   shown on the tree but locked.
 - Faith and three omens. Emergent beliefs (first version).
 - Births, aging, pairing, deaths.
-- IMGUI debug HUD. Camera: WASD/arrows pan, Q/E or middle mouse to rotate,
-  scroll to zoom.
+- IMGUI debug HUD with minimap. Camera: WASD/arrows pan, Q/E or middle mouse to
+  rotate, scroll to zoom.
 
 ## Roadmap
 

@@ -104,7 +104,7 @@ namespace TheDawn
                 float min = Placing.Radius + 0.8f;
                 if ((n.transform.position - p).sqrMagnitude < min * min) { why = "Blocked by a " + (n.Type == ResourceType.Tree ? "tree" : "rock"); return false; }
             }
-            if (Tribe.Instance.HasCamp && Vector3.Distance(p, Tribe.Instance.CampPosition) > 70f) { why = "Too far from camp"; return false; }
+            if (Tribe.Instance.HasCamp && Vector3.Distance(p, Tribe.Instance.CampPosition) > 90f) { why = "Too far from camp"; return false; }
             return true;
         }
     }

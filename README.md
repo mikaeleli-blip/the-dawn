@@ -11,6 +11,7 @@ See **[docs/DESIGN.md](docs/DESIGN.md)** for the full design.
 Primitive shapes, procedural terrain and a debug HUD. The goal is to get the
 systems right before art goes in.
 
+- A 1 km × 1 km valley with a river, two lakes, forests and hills; clickable minimap
 - A nomadic band of 8 with names, ages, families, skills, traits and needs
 - People choose their own roles (forager, hunter, gatherer, builder, crafter,
   firekeeper) based on tribe needs, skills and traits
@@ -39,6 +40,7 @@ systems right before art goes in.
 | Zoom | Mouse wheel |
 | Select / inspect | Left click |
 | Focus selected | F |
+| Jump camera | Click or drag on the minimap |
 | Build | Build panel → pick a plan → left click to place, R to rotate, right click/Esc to stop |
 | Speed | Space = pause, 1/2/3/4 = 1x/2x/4x/8x |
 

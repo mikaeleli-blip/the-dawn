@@ -94,7 +94,70 @@ namespace TheDawn
             DrawLeft(sh);
             DrawInspector(sw);
             DrawLog(sh);
+            DrawMiniMap(sw, sh);
             if (BuildPlacer.Instance.Placing != null) DrawPlacingHint(sw, sh);
+        }
+
+        // ------------------------------------------------------------------
+        void DrawMiniMap(float sw, float sh)
+        {
+            var w = World.Instance;
+            if (w == null || w.MiniMap == null) return;
+            const float size = 220f;
+            var outer = Area(sw - size - 16, sh - size - 16, size + 8, size + 8);
+            GUI.Box(outer, "", box);
+            var r = new Rect(outer.x + 4, outer.y + 4, size, size);
+            GUI.DrawTexture(r, w.MiniMap);
+
+            foreach (var b in Building.All)
+                Dot(r, b.transform.position, b.Built ? 4f : 3f, b.IsLitFire ? new Color(1f, 0.6f, 0.2f) : new Color(0.75f, 0.6f, 0.4f));
+            foreach (var a in Animal.All)
+                if (a.Alive) Dot(r, a.Position, a.IsPredator ? 4f : 3f, a.IsPredator ? new Color(0.9f, 0.2f, 0.15f) : new Color(0.55f, 0.4f, 0.25f));
+            foreach (var p in Tribe.Instance.People)
+                Dot(r, p.Position, 3f, new Color(1f, 0.95f, 0.8f));
+            var sel = Selection.Instance.Selected;
+            if (sel != null) Dot(r, sel.transform.position, 6f, new Color(1f, 0.9f, 0.4f));
+
+            // Camera view marker
+            if (CameraRig.Instance != null)
+            {
+                Vector2 c = MapToGui(r, CameraRig.Instance.Focus);
+                float half = Mathf.Clamp(CameraRig.Instance.Distance / w.Size * size, 4f, 40f);
+                var col = new Color(1f, 1f, 1f, 0.8f);
+                Line(new Rect(c.x - half, c.y - half, half * 2f, 1f), col);
+                Line(new Rect(c.x - half, c.y + half, half * 2f, 1f), col);
+                Line(new Rect(c.x - half, c.y - half, 1f, half * 2f), col);
+                Line(new Rect(c.x + half, c.y - half, 1f, half * 2f + 1f), col);
+            }
+
+            // Click or drag on the map to move the camera there.
+            Event e = Event.current;
+            if ((e.type == EventType.MouseDown || e.type == EventType.MouseDrag) && e.button == 0 && r.Contains(e.mousePosition))
+            {
+                Vector2 uv = new Vector2((e.mousePosition.x - r.x) / r.width, 1f - (e.mousePosition.y - r.y) / r.height);
+                if (CameraRig.Instance != null) CameraRig.Instance.Focus = w.FromMap(uv);
+                e.Use();
+            }
+        }
+
+        static Vector2 MapToGui(Rect r, Vector3 world)
+        {
+            Vector2 uv = World.Instance.ToMap(world);
+            return new Vector2(r.x + uv.x * r.width, r.y + (1f - uv.y) * r.height);
+        }
+
+        static void Dot(Rect r, Vector3 world, float s, Color c)
+        {
+            Vector2 g = MapToGui(r, world);
+            Line(new Rect(g.x - s * 0.5f, g.y - s * 0.5f, s, s), c);
+        }
+
+        static void Line(Rect rect, Color c)
+        {
+            var old = GUI.color;
+            GUI.color = c;
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+            GUI.color = old;
         }
 
         // ------------------------------------------------------------------

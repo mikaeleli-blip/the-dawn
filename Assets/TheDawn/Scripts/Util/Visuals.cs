@@ -30,6 +30,7 @@ namespace TheDawn
             Material m;
             if (cache.TryGetValue(c, out m) && m != null) return m;
             m = new Material(LitShader);
+            m.enableInstancing = true;
             m.color = c;
             if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c);
             if (m.HasProperty("_Glossiness")) m.SetFloat("_Glossiness", 0.1f);

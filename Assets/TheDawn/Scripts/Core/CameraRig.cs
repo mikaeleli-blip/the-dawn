@@ -8,14 +8,18 @@ namespace TheDawn
     /// </summary>
     public class CameraRig : MonoBehaviour
     {
+        public static CameraRig Instance { get; private set; }
+
         public float Yaw = 30f;
         public float Pitch = 52f;
         public float Distance = 38f;
-        public float MinDistance = 8f, MaxDistance = 140f;
+        public float MinDistance = 8f, MaxDistance = 320f;
         public Vector3 Focus;
 
         Camera cam;
         Vector2 lastMouse;
+
+        void Awake() { Instance = this; }
 
         public void Init(Camera c, Vector3 focus)
         {
@@ -80,7 +84,10 @@ namespace TheDawn
             cam.transform.position = Focus - rot * Vector3.forward * Distance;
             cam.transform.rotation = rot;
             RenderSettings.fogStartDistance = Distance * 1.2f;
-            RenderSettings.fogEndDistance = Distance * 1.2f + 180f;
+            RenderSettings.fogEndDistance = Distance * 1.2f + 220f;
+            // Nothing past the fog is visible, so don't draw it.
+            cam.farClipPlane = RenderSettings.fogEndDistance + 40f;
+            QualitySettings.shadowDistance = Mathf.Clamp(Distance * 2.5f, 60f, 400f);
         }
     }
 }

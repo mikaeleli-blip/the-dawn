@@ -15,9 +15,9 @@ namespace TheDawn
 
         public void Init(Biome biome, Vector3 tribeStart)
         {
-            for (int i = 0; i < biome.DeerHerds; i++) SpawnGroup(Species.Deer, Random.Range(3, 6), tribeStart, 45f);
-            for (int i = 0; i < biome.BoarGroups; i++) SpawnGroup(Species.Boar, Random.Range(2, 4), tribeStart, 50f);
-            for (int i = 0; i < biome.WolfPacks; i++) SpawnGroup(Species.Wolf, Random.Range(3, 5), tribeStart, 85f);
+            for (int i = 0; i < biome.DeerHerds; i++) SpawnGroup(Species.Deer, Random.Range(3, 6), tribeStart, 70f);
+            for (int i = 0; i < biome.BoarGroups; i++) SpawnGroup(Species.Boar, Random.Range(2, 4), tribeStart, 80f);
+            for (int i = 0; i < biome.WolfPacks; i++) SpawnGroup(Species.Wolf, Random.Range(3, 5), tribeStart, 170f);
             GameClock.Instance.OnNewDay += DailyTick;
             GameClock.Instance.OnNewSeason += SeasonTick;
         }
@@ -73,11 +73,11 @@ namespace TheDawn
             }
             // New herds wander in; a destroyed pack's territory is retaken after a while.
             if (clock.Season == Season.Spring && deer < World.Instance.Biome.DeerHerds)
-                SpawnGroup(Species.Deer, Random.Range(3, 5), Tribe.Instance.CampPosition, 70f);
+                SpawnGroup(Species.Deer, Random.Range(3, 5), Tribe.Instance.CampPosition, 120f);
             Groups.RemoveAll(g => g.AliveCount == 0 && g.Species == Species.Wolf && Random.value < 0.5f);
             if (wolfPacks < World.Instance.Biome.WolfPacks && Random.value < 0.4f)
             {
-                SpawnGroup(Species.Wolf, 3, Tribe.Instance.CampPosition, 90f);
+                SpawnGroup(Species.Wolf, 3, Tribe.Instance.CampPosition, 200f);
                 EventLog.Add("Howling in the hills: a new wolf pack has moved in.", LogKind.Warning);
             }
         }
@@ -103,7 +103,7 @@ namespace TheDawn
             if (!bold && Random.value > 0.1f) return;
 
             Vector3 c = PackCenter(g);
-            float range = bold ? 70f : 45f;
+            float range = bold ? 80f : 50f;
 
             // Prefer deer and boar.
             Animal bestPrey = null;
