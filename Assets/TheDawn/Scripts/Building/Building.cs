@@ -42,9 +42,9 @@ namespace TheDawn
             new BuildingDef { Type = BuildingType.Campfire, Name = "Campfire", Wood = 5, Work = 8, Radius = 1.2f,
                 Description = "Warmth, light and safety. Wolves keep away from a lit fire. Burns wood. The first campfire founds your camp.",
                 Requires = KnowledgeId.Firemaking },
-            new BuildingDef { Type = BuildingType.LeanTo, Name = "Lean-to", Wood = 8, Work = 18, Radius = 1.6f, ShelterCapacity = 3, ShelterWarmth = 9f,
+            new BuildingDef { Type = BuildingType.LeanTo, Name = "Lean-to", Wood = 8, Work = 18, Radius = 1.6f, ShelterCapacity = 3, ShelterWarmth = 14f,
                 Description = "A simple shelter of branches. Sleeps 3." },
-            new BuildingDef { Type = BuildingType.HideHut, Name = "Hide Hut", Wood = 10, Hide = 4, Work = 40, Radius = 2.2f, ShelterCapacity = 5, ShelterWarmth = 16f,
+            new BuildingDef { Type = BuildingType.HideHut, Name = "Hide Hut", Wood = 10, Hide = 4, Work = 40, Radius = 2.2f, ShelterCapacity = 5, ShelterWarmth = 24f,
                 Description = "A warm hut of poles and hides. Sleeps 5.", Requires = KnowledgeId.HideWorking },
             new BuildingDef { Type = BuildingType.DryingRack, Name = "Drying Rack", Wood = 6, Work = 14, Radius = 1.3f,
                 Description = "Dries meat and berries so less food spoils.", Requires = KnowledgeId.FoodDrying },
@@ -66,8 +66,8 @@ namespace TheDawn
     public class Building : MonoBehaviour
     {
         public static readonly List<Building> All = new List<Building>();
-        public const float MaxFuel = 8f;
-        public const float FireWarmRadius = 7f;
+        public const float MaxFuel = 12f;
+        public const float FireWarmRadius = 9f;
         public const float FireScareRadius = 16f;
 
         public BuildingDef Def;
@@ -215,7 +215,7 @@ namespace TheDawn
             Progress = Def.Work;
             if (Def.Type == BuildingType.Campfire)
             {
-                Fuel = 3f;
+                Fuel = 4f;
                 if (!Tribe.Instance.HasCamp) Tribe.Instance.FoundCamp(transform.position);
             }
             RefreshLook();
@@ -267,8 +267,8 @@ namespace TheDawn
         {
             if (Def.Type != BuildingType.Campfire || !Built) return;
             var clock = GameClock.Instance;
-            // One wood lasts ~3 hours; faster in the cold.
-            float burn = clock.DeltaHours / 3f * (clock.Temperature < 0f ? 1.4f : 1f);
+            // One wood lasts ~4 hours; faster in the cold.
+            float burn = clock.DeltaHours / 4f * (clock.Temperature < 0f ? 1.4f : 1f);
             bool wasLit = Fuel > 0f;
             Fuel = Mathf.Max(0f, Fuel - burn);
             if (wasLit && Fuel <= 0f) EventLog.Add("A campfire has gone out.", LogKind.Warning);

@@ -171,11 +171,14 @@ namespace TheDawn
         public float EffectiveTemperature()
         {
             float t = C.Temperature;
-            var fire = Building.NearestLitFire(Position, Building.FireWarmRadius);
-            if (fire != null) t += 18f;
-            if (sleeping && building != null && building.Def.ShelterWarmth > 0f && building.Built)
+            t += 4f; // everyone wears furs and skins
+            if (Building.NearestLitFire(Position, Building.FireWarmRadius) != null) t += 10f;
+            if (sleeping && building != null && building.Built && building.Def.ShelterWarmth > 0f)
+            {
                 t += building.Def.ShelterWarmth;
-            if (HasCloak) t += 8f;
+                t += Mathf.Min(6f, Mathf.Max(0, building.Sleepers.Count - 1) * 1.5f); // body heat
+            }
+            if (HasCloak) t += 10f;
             if (Has(Trait.Hardy)) t += 4f;
             if (IsChild) t -= 2f;
             return t;
@@ -187,8 +190,10 @@ namespace TheDawn
             if (sleeping) Rest = Mathf.Min(100f, Rest + 12f * dh);
             else Rest = Mathf.Max(0f, Rest - 4.2f * dh);
 
-            float temp = EffectiveTemperature();
-            Warmth = Mathf.Clamp(Warmth + (temp - 10f) * 0.6f * dh, 0f, 100f);
+            // Warmth drifts with how cold it feels; sitting right by a fire warms you quickly.
+            float dw = (EffectiveTemperature() - 10f) * 0.4f;
+            if (Building.NearestLitFire(Position, 5f) != null) dw += 12f;
+            Warmth = Mathf.Clamp(Warmth + dw * dh, 0f, 100f);
 
             // Health
             float dmg = 0f;
@@ -378,6 +383,8 @@ namespace TheDawn
 
             if (C.IsNight && (Rest < 85f || C.Hour >= 21f || C.Hour < 5f))
             {
+                // Firekeepers and elders bank the fire before sleeping.
+                if (Job == JobKind.Idle && (Role == Role.Firekeeper || Role == Role.Elder) && TryFuelFire(0.85f)) return;
                 StartJob(JobKind.Sleep, "Going to sleep");
                 return;
             }
@@ -385,7 +392,7 @@ namespace TheDawn
             if (Warmth < 30f && Building.NearestLitFire(Position, 80f) != null && !C.IsNight)
             {
                 StartJob(JobKind.Warm, "Warming up by the fire");
-                timer = 25f;
+                timer = 40f;
                 return;
             }
 
@@ -398,6 +405,9 @@ namespace TheDawn
                 StartJob(JobKind.Gather, "Gathering by the fire");
                 return;
             }
+
+            // Anyone at camp feeds a fire that's about to go out.
+            if (Near(T.CampPosition, 40f) && TryFuelFire(0.25f)) return;
 
             // Pick up gear at camp.
             if (Role == Role.Hunter && !HasSpear && T.Stock(Res.Spear) >= 1f && Near(T.StockpilePoint(Position), 6f))
@@ -414,7 +424,13 @@ namespace TheDawn
                 case Role.Gatherer: if (!TryGatherMaterials()) Loiter(); break;
                 case Role.Builder: if (!TryBuild()) if (!TryGatherMaterials()) Loiter(); break;
                 case Role.Crafter: if (!TryCraft()) if (!TryGatherMaterials()) Loiter(); break;
-                case Role.Firekeeper: if (!TryFuelFire()) if (!TryGatherWood()) Loiter(); break;
+                case Role.Firekeeper:
+                    // Keep the fire fed and a woodpile ready, then help nearby instead of hoarding wood.
+                    if (TryFuelFire(0.75f)) break;
+                    if (T.Stock(Res.Wood) < 50f && TryGatherWood(60f)) break;
+                    if (TryForage(40f)) break;
+                    Loiter();
+                    break;
                 default: Loiter(); break;
             }
         }
@@ -428,7 +444,7 @@ namespace TheDawn
 
         void ThinkElder()
         {
-            if (TryFuelFire()) return;
+            if (TryFuelFire(0.6f)) return;
             if (Random.value < 0.4f && TryForage(25f)) return;
             var fire = Building.NearestLitFire(Position, 80f);
             if (fire != null)
@@ -480,9 +496,9 @@ namespace TheDawn
             return true;
         }
 
-        bool TryGatherWood()
+        bool TryGatherWood(float range = 120f)
         {
-            var n = FindNode(ResourceType.Tree, 120f, T.CampPosition);
+            var n = FindNode(ResourceType.Tree, range, T.CampPosition);
             if (n == null) return false;
             StartJob(JobKind.Harvest, "Gathering wood");
             node = n; node.ReservedBy = this; CarryType = Res.Wood;
@@ -554,22 +570,25 @@ namespace TheDawn
             foreach (var p in T.People) if (p.HasCloak) cloaked++;
             bool needCloak = hideWork && T.Stock(Res.Cloak) + cloaked < T.People.Count && T.Stock(Res.Hide) >= 2f;
 
+            bool experiment = !hideWork && T.Stock(Res.Hide) >= 1f;
+
             if (needSpear && canSpear) wantRes = Res.Spear;
             else if (needCloak) wantRes = Res.Cloak;
+            else if (experiment) wantRes = Res.Hide;
             else return false;
 
-            StartJob(JobKind.Craft, wantRes == Res.Spear ? "Knapping a spear" : "Sewing a hide cloak");
+            StartJob(JobKind.Craft, wantRes == Res.Spear ? "Knapping a spear" : wantRes == Res.Cloak ? "Sewing a hide cloak" : "Scraping and stretching a hide");
             var spot = Building.NearestBuilt(BuildingType.KnappingSpot, Position, 200f);
             dest = spot != null ? spot.transform.position + Random.insideUnitSphere * 1.5f : T.StockpilePoint(Position);
             dest = W.OnGround(dest);
             return true;
         }
 
-        bool TryFuelFire()
+        bool TryFuelFire(float threshold)
         {
             if (T.Stock(Res.Wood) < 1f) return false;
             Building low = null;
-            float lowest = 0.6f;
+            float lowest = threshold;
             foreach (var b in Building.All)
             {
                 if (!b.Built || b.Def.Type != BuildingType.Campfire) continue;
@@ -717,10 +736,10 @@ namespace TheDawn
         {
             var fire = Building.NearestLitFire(Position, 100f);
             if (fire == null) { Finish(); return; }
-            if (phase == 0) { dest = W.RandomLandPointNear(fire.transform.position, 3f); phase = 1; }
+            if (phase == 0) { dest = W.RandomLandPointNear(fire.transform.position, 2.5f); phase = 1; }
             timer -= Time.deltaTime;
             if (!MoveTo(dest, 0.5f)) return;
-            if (Warmth > 75f || timer <= 0f) Finish();
+            if (Warmth > 70f || timer <= 0f) Finish();
         }
 
         void RunGather()
@@ -986,8 +1005,9 @@ namespace TheDawn
             float spotBonus = Building.NearestBuilt(BuildingType.KnappingSpot, Position, 4f) != null ? 1.4f : 1f;
             timer += Time.deltaTime * WorkSpeed(Skill.Crafting) * spotBonus;
             Practice(Skill.Crafting, Time.deltaTime);
-            float needed = wantRes == Res.Spear ? 12f : 18f;
+            float needed = wantRes == Res.Spear ? 12f : wantRes == Res.Cloak ? 18f : 15f;
             if (timer < needed) return;
+            if (wantRes == Res.Hide) { Finish(); return; } // practice only
             if (wantRes == Res.Spear)
             {
                 if (T.Take(Res.Wood, 1f) >= 1f && T.Take(Res.Flint, 1f) >= 1f) T.Add(Res.Spear, 1f);
@@ -1006,7 +1026,7 @@ namespace TheDawn
             {
                 if (!MoveTo(T.StockpilePoint(Position), 2f)) return;
                 CarryType = Res.Wood;
-                CarryAmount = T.Take(Res.Wood, Mathf.Min(3f, Building.MaxFuel - building.Fuel));
+                CarryAmount = T.Take(Res.Wood, Mathf.Min(4f, Mathf.Floor(Building.MaxFuel - building.Fuel)));
                 if (CarryAmount <= 0f) { Finish(); return; }
                 phase = 1;
             }

@@ -119,7 +119,9 @@ namespace TheDawn
             float spears = tribe.Stock(Res.Spear);
             foreach (var p in tribe.People) if (p.HasSpear) spears++;
             float craftNeed = Mathf.Max(0f, tribe.CountRole(Role.Hunter) + 2f - spears) * 0.4f;
-            if (KnowledgeSystem.Instance.Effect(KnowledgeId.HideWorking) > 0f && tribe.Stock(Res.Hide) >= 2f) craftNeed += 0.6f;
+            bool hideWork = KnowledgeSystem.Instance.Effect(KnowledgeId.HideWorking) > 0f;
+            if (hideWork && tribe.Stock(Res.Hide) >= 2f) craftNeed += 0.6f;
+            if (!hideWork && tribe.Stock(Res.Hide) >= 2f) craftNeed += 0.5f; // someone tinkers with the hides
             Demand[Role.Crafter] = craftNeed * tribe.PriorityMul(PriorityCat.Crafting);
 
             bool hasFire = false;
