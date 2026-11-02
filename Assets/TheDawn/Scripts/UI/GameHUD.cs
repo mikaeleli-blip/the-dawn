@@ -12,12 +12,12 @@ namespace TheDawn
         public static GameHUD Instance { get; private set; }
         public static bool PointerOverUI { get; private set; }
 
-        enum Panel { None, Build, Tribe, Knowledge, Omens, Priorities, Culture }
+        enum Panel { None, Build, Camps, Tribe, Knowledge, Omens, Priorities, Culture }
         Panel panel = Panel.Build;
 
         readonly List<Rect> uiRects = new List<Rect>();
         float scale = 1f;
-        Vector2 scrollTribe, scrollKnow, scrollLog, scrollInspect;
+        Vector2 scrollTribe, scrollKnow, scrollLog, scrollInspect, scrollCamps;
         GUIStyle box, label, small, header, wrap, good, warn, danger;
         bool stylesReady;
         int speedBeforePause = 1;
@@ -95,7 +95,7 @@ namespace TheDawn
             DrawInspector(sw);
             DrawLog(sh);
             DrawMiniMap(sw, sh);
-            if (BuildPlacer.Instance.Placing != null) DrawPlacingHint(sw, sh);
+            if (BuildPlacer.Instance.Active) DrawPlacingHint(sw, sh);
         }
 
         // ------------------------------------------------------------------
@@ -109,6 +109,12 @@ namespace TheDawn
             var r = new Rect(outer.x + 4, outer.y + 4, size, size);
             GUI.DrawTexture(r, w.MiniMap);
 
+            foreach (var camp in Tribe.Instance.Camps)
+            {
+                bool cur = camp == Tribe.Instance.CurrentCamp;
+                Dot(r, camp.Center, cur ? 10f : 8f, cur ? new Color(1f, 0.85f, 0.3f, 0.9f) : new Color(0.7f, 0.7f, 0.7f, 0.8f));
+            }
+            if (Tribe.Instance.MarkedSite.HasValue) Dot(r, Tribe.Instance.MarkedSite.Value, 8f, new Color(0.4f, 0.9f, 1f));
             foreach (var b in Building.All)
                 Dot(r, b.transform.position, b.Built ? 4f : 3f, b.IsLitFire ? new Color(1f, 0.6f, 0.2f) : new Color(0.75f, 0.6f, 0.4f));
             foreach (var a in Animal.All)
@@ -169,6 +175,9 @@ namespace TheDawn
             GUILayout.BeginHorizontal();
             GUILayout.Label("<b>" + c.Season + "</b> day " + c.DayOfSeason + ", year " + c.Year + "  " + c.TimeString +
                             "  " + Mathf.RoundToInt(c.Temperature) + "°C", label, GUILayout.Width(300));
+            string campText = !t.HasCamp ? "No camp" : t.Moving ? "Moving to " + t.CurrentCamp.Name
+                : t.CurrentCamp.Name + (t.Settled ? " (home)" : "  (moves in " + t.DaysUntilMove.ToString("0.0") + "d)");
+            GUILayout.Label(campText, label, GUILayout.Width(250));
             string sp = Time.timeScale <= 0f ? "Paused" : Time.timeScale + "x";
             if (GUILayout.Button(Time.timeScale <= 0f ? ">" : "||", GUILayout.Width(34))) TogglePause();
             if (GUILayout.Button("1x", GUILayout.Width(34))) SetSpeed(1);
@@ -191,12 +200,21 @@ namespace TheDawn
         {
             var t = Tribe.Instance;
             string goal;
+            var c = GameClock.Instance;
+            var ks = KnowledgeSystem.Instance;
+            var stay = KnowledgeSystem.Def(KnowledgeId.Sedentism);
+            bool needWinterSite = !t.Settled && c.Season == Season.Summer && !t.MarkedSite.HasValue && !t.Camps.Exists(x => x.Kind == CampKind.Winter);
             if (t.People.Count == 0) goal = "The band is gone.";
-            else if (!t.HasCamp) goal = "Goal: found a camp. Open Build and place a Campfire.";
-            else if (t.ShelterSpaces < t.People.Count) goal = "Goal: shelter everyone before winter (Lean-tos).";
+            else if (!t.HasCamp) goal = "Goal: make camp. Open Build and place a Campfire.";
+            else if (t.Moving) goal = "The band is moving to " + t.CurrentCamp.Name + ".";
+            else if (t.ShelterSpaces < t.People.Count) goal = "Goal: shelter everyone at this camp (Lean-tos).";
+            else if (needWinterSite) goal = "Goal: mark a winter camp site (Camps panel): sheltered, with wood and game.";
             else if (!t.SurvivedFirstWinter) goal = "Goal: survive the first winter. Store food and wood.";
-            else goal = "The band endures. Seek the knowledge of Staying Put.";
-            var r = Area(sw * 0.5f - 230, 40, 460, 26);
+            else if (t.Settled) goal = "The Wanderers era is complete. Settling & Farming comes next (not in this build yet).";
+            else if (t.CanSettle) goal = "Staying Put is known: choose a camp and settle for good (Camps panel).";
+            else if (!ks.PrereqsMet(stay)) goal = "Goal: learn Food Drying, Storage Pits and Hide Working, the roots of Staying Put.";
+            else goal = "Goal: discover Staying Put (" + Pct(ks.InsightOf(KnowledgeId.Sedentism) / stay.Insight) + "). Returning to known camps helps.";
+            var r = Area(sw * 0.5f - 300, 40, 600, 26);
             GUI.Box(r, "", box);
             GUI.Label(new Rect(r.x + 10, r.y + 4, r.width - 20, 20), goal, label);
         }
@@ -204,6 +222,17 @@ namespace TheDawn
         void DrawPlacingHint(float sw, float sh)
         {
             var bp = BuildPlacer.Instance;
+            if (bp.MarkingSite)
+            {
+                var mr = Area(sw * 0.5f - 260, sh - 130, 520, 104);
+                GUI.Box(mr, "", box);
+                var rep = bp.HoverReport;
+                string txt = "Marking the next camp site. Left click to mark, right click/Esc to stop.";
+                if (!string.IsNullOrEmpty(bp.Reason)) txt += "\n<b>" + bp.Reason + "</b>";
+                if (rep != null) txt += "\n" + (rep.Acceptable ? "<color=#99dd77>" : "<color=#ff8866>") + rep.Verdict + "</color>  (score " + Mathf.RoundToInt(rep.Total * 100f) + ")\n" + rep.Details();
+                GUI.Label(new Rect(mr.x + 10, mr.y + 4, mr.width - 20, mr.height - 8), txt, wrap);
+                return;
+            }
             var r = Area(sw * 0.5f - 230, sh - 70, 460, 44);
             GUI.Box(r, "", box);
             string reason = string.IsNullOrEmpty(bp.Reason) ? "" : "  <color=#ff8866>" + bp.Reason + "</color>";
@@ -214,8 +243,9 @@ namespace TheDawn
         // ------------------------------------------------------------------
         void DrawLeft(float sh)
         {
-            GUILayout.BeginArea(Area(8, 72, 90, 210), box);
+            GUILayout.BeginArea(Area(8, 72, 90, 240), box);
             if (Tab("Build", Panel.Build)) { }
+            if (Tab("Camps", Panel.Camps)) { }
             if (Tab("Tribe", Panel.Tribe)) { }
             if (Tab("Knowledge", Panel.Knowledge)) { }
             if (Tab("Omens", Panel.Omens)) { }
@@ -229,6 +259,7 @@ namespace TheDawn
             switch (panel)
             {
                 case Panel.Build: DrawBuild(); break;
+                case Panel.Camps: DrawCamps(); break;
                 case Panel.Tribe: DrawTribe(); break;
                 case Panel.Knowledge: DrawKnowledge(); break;
                 case Panel.Omens: DrawOmens(); break;
@@ -263,6 +294,73 @@ namespace TheDawn
                 GUILayout.Label(ok ? d.Description : "<color=#cc8866>" + why + "</color>", wrap);
                 GUILayout.Space(4);
             }
+        }
+
+        void DrawCamps()
+        {
+            var t = Tribe.Instance;
+            GUILayout.Label("Camps", header);
+            if (!t.HasCamp)
+            {
+                GUILayout.Label("The band has no camp yet. Place a Campfire to make the first one.", wrap);
+                return;
+            }
+            scrollCamps = GUILayout.BeginScrollView(scrollCamps);
+            var cur = t.CurrentCamp;
+            GUILayout.Label("<b>" + cur.Name + "</b>, " + cur.KindName + (t.Settled ? " (home for good)" : ""), label);
+            if (cur.Report != null) GUILayout.Label(cur.Report.Details(), small);
+            if (cur.Kind == CampKind.Winter && cur.Report != null && cur.Report.Sheltered) GUILayout.Label("Out of the wind: +3°C around camp.", good);
+
+            GUILayout.Space(6);
+            if (t.Settled)
+                GUILayout.Label("The band lives here all year round now.", wrap);
+            else if (t.Moving)
+                GUILayout.Label("The band is on the move.", wrap);
+            else
+            {
+                var c = GameClock.Instance;
+                bool toWinter = cur.Kind == CampKind.Warm;
+                GUILayout.Label("Next move: to a " + (toWinter ? "winter camp" : "warm-season camp") + " in " + t.DaysUntilMove.ToString("0.0") + " days (start of " + (toWinter ? "autumn" : "spring") + ").", wrap);
+                if (t.MarkedSite.HasValue && t.MarkedReport != null)
+                {
+                    var existing = t.CampAt(t.MarkedSite.Value);
+                    if (existing != null) GUILayout.Label("Marked: return to " + existing.Name + ".", good);
+                    else
+                    {
+                        float dist = Vector3.Distance(t.MarkedSite.Value, cur.Center);
+                        GUILayout.Label("Marked site, " + Mathf.RoundToInt(dist) + " m away. " + t.MarkedReport.Verdict, t.MarkedReport.Acceptable ? good : warn);
+                        GUILayout.Label(t.MarkedReport.Details(), small);
+                        if (dist > CampSites.MaxMoveDistance) GUILayout.Label("Too far: the elders won't walk more than " + CampSites.MaxMoveDistance + " m.", danger);
+                        if (dist < CampSites.MinMoveDistance) GUILayout.Label("Too close: that's the land we already live on.", danger);
+                    }
+                    if (GUILayout.Button("Clear the mark")) t.ClearMark();
+                }
+                else
+                {
+                    var known = t.Camps.Find(x => x.Kind != cur.Kind);
+                    GUILayout.Label(known != null ? "No site marked: the band will return to " + known.Name + "." : "No site marked: the elders will choose a place themselves.", small);
+                }
+                if (GUILayout.Button("Mark the next camp site")) BuildPlacer.Instance.BeginMarkSite();
+            }
+
+            if (t.CanSettle)
+            {
+                GUILayout.Space(6);
+                GUILayout.Label("Staying Put is known. The band can make " + cur.Name + " its home all year round.", good);
+                if (GUILayout.Button("<b>Settle here for good</b>")) t.Settle();
+            }
+
+            GUILayout.Space(8);
+            GUILayout.Label("Known camps", label);
+            foreach (var camp in t.Camps)
+            {
+                int buildings = 0;
+                foreach (var b in Building.All) if (b.Camp == camp && b.Built) buildings++;
+                GUILayout.Label((camp == cur ? "<b>" + camp.Name + "</b>" : camp.Name) + " (" + (camp.Kind == CampKind.Warm ? "warm" : "winter") + ")  stays " + camp.TimesUsed +
+                                ", buildings " + buildings + (camp != cur ? ", food left " + Mathf.FloorToInt(camp.Stock[(int)Res.Food]) : ""), small);
+            }
+            GUILayout.Label("Returning to known camps: Staying Put insight x" + t.FamiliarityMultiplier.ToString("0.00"), small);
+            GUILayout.EndScrollView();
         }
 
         void DrawTribe()
@@ -305,7 +403,7 @@ namespace TheDawn
                 else if (st == KnowledgeStatus.Faded) { state = "Faded: " + Pct(k.InsightOf(d.Id) / d.Insight); style = danger; }
                 else if (!d.Implemented) state = "not in this build";
                 else if (!k.PrereqsMet(d)) state = "needs earlier knowledge";
-                else state = d.Activity + " insight " + Pct(k.InsightOf(d.Id) / d.Insight);
+                else state = d.Activity + (d.Activity2.HasValue ? "/" + d.Activity2.Value : "") + " insight " + Pct(k.InsightOf(d.Id) / d.Insight);
                 GUILayout.Label("<b>" + d.Name + "</b>  " + state, style);
                 GUILayout.Label(d.Description, wrap);
             }
@@ -440,6 +538,8 @@ namespace TheDawn
         {
             GUILayout.Label(b.Def.Name, header);
             GUILayout.Label(b.Def.Description, wrap);
+            if (b.Camp != null) GUILayout.Label("At " + b.Camp.Name + (b.Camp == Tribe.Instance.CurrentCamp ? " (current camp)" : ""), small);
+            if (b.Built && b.Decays) GUILayout.Label("Condition " + Bar(b.Condition * 100f) + (b.Camp != Tribe.Instance.CurrentCamp ? "  (falling apart while empty)" : ""), small);
             if (!b.Built)
             {
                 GUILayout.Label("Plan: " + Pct(b.Progress / b.Def.Work) + " built", label);

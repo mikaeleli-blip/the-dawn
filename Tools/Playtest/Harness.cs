@@ -106,7 +106,7 @@ public static class Harness
         int Count(BuildingType t, bool includePlans = true)
         {
             int n = 0;
-            foreach (var b in Building.All) if (b.Def.Type == t && (includePlans || b.Built)) n++;
+            foreach (var b in Building.All) if (b.Def.Type == t && Tribe.Instance.InCurrentCamp(b) && (includePlans || b.Built)) n++;
             return n;
         }
 
@@ -124,12 +124,30 @@ public static class Harness
                 return;
             }
             if (!t.HasCamp) return;
+            if (t.CanSettle) { t.Settle(); Act("Settled for good at " + t.CurrentCamp.Name); return; }
+            if (t.Moving) return;
             Vector3 camp = t.CampPosition;
 
+            // Mark a winter camp site during summer, like a player scanning the map for a sheltered spot.
+            if (!t.Settled && c.Season == Season.Summer && c.DayOfSeason >= 3 && !t.MarkedSite.HasValue && !t.Camps.Any(x => x.Kind == CampKind.Winter))
+            {
+                Vector3 best = camp; float bestScore = -1f;
+                for (int i = 0; i < 40; i++)
+                {
+                    float a = UnityEngine.Random.value * Mathf.PI * 2f, d = UnityEngine.Random.Range(150f, 380f);
+                    Vector3 p = World.Instance.OnGround(camp + new Vector3(Mathf.Cos(a) * d, 0f, Mathf.Sin(a) * d));
+                    var rep = CampSites.Evaluate(p, CampKind.Winter);
+                    if (rep.Total > bestScore) { bestScore = rep.Total; best = p; }
+                }
+                t.MarkSite(best);
+                Act("Marked a winter camp site, score " + (bestScore * 100f).ToString("0") + ": " + t.MarkedReport.Verdict);
+                return;
+            }
+
             // 2. Shelter for everyone (+1 spare), at most two plans waiting at a time.
-            int plans = Building.All.Count(b => !b.Built);
+            int plans = Building.All.Count(b => !b.Built && t.InCurrentCamp(b));
             int spaces = 0;
-            foreach (var b in Building.All) spaces += b.Def.ShelterCapacity;
+            foreach (var b in Building.All) if (t.InCurrentCamp(b)) spaces += b.Def.ShelterCapacity;
             if (spaces < t.People.Count + 1 && plans < 2)
             {
                 var hutDef = BuildingDef.Get(BuildingType.HideHut);
@@ -184,20 +202,12 @@ public static class Harness
             var def = BuildingDef.Get(type);
             string why;
             if (!BuildPlacer.CanBuild(def, out why)) return;
-            for (float r = ring; r < ring + 40f; r += 2f)
+            Vector3 p;
+            if (BuildPlacer.TryFindSpot(def, around, ring, out p))
             {
-                for (int i = 0; i < 16; i++)
-                {
-                    float a = (i / 16f + r * 0.13f) * Mathf.PI * 2f;
-                    Vector3 p = World.Instance.OnGround(around + new Vector3(Mathf.Cos(a) * r, 0f, Mathf.Sin(a) * r));
-                    if (Valid(def, p, out why))
-                    {
-                        Building.Create(def, p, 0f, buildRoot);
-                        RoleAssigner.Instance.Reassign();
-                        Act("Placed " + def.Name + " " + Vector3.Distance(p, Tribe.Instance.CampPosition).ToString("0") + " m from camp");
-                        return;
-                    }
-                }
+                BuildPlacer.Instance.CreatePlan(def, p, 0f);
+                Act("Placed " + def.Name + " " + Vector3.Distance(p, Tribe.Instance.CampPosition).ToString("0") + " m from camp");
+                return;
             }
             Act("Could not find a spot for " + def.Name);
         }
@@ -247,7 +257,7 @@ public static class Harness
         public Metrics(string dir)
         {
             this.dir = dir;
-            daily.AppendLine("day,stamp,pop,adults,children,food,foodDays,wood,flint,hides,spears,cloaks,faith,shelter,builtBuildings,plans,fireFuel,deaths,births,known,beliefs,avgHunger,avgWarmth,avgHealth,avgMood,minWarmth,minHealth,tempMin,tempMax,roles,wolves,deer,boar");
+            daily.AppendLine("day,stamp,camp,moving,returns,stayPct,pop,adults,children,food,foodDays,wood,flint,hides,spears,cloaks,faith,shelter,builtBuildings,plans,fireFuel,deaths,births,known,beliefs,avgHunger,avgWarmth,avgHealth,avgMood,minWarmth,minHealth,tempMin,tempMax,roles,wolves,deer,boar");
         }
 
         public void Hourly()
@@ -295,8 +305,9 @@ public static class Harness
             int wolves = Animal.All.Count(a => a.Alive && a.Species == Species.Wolf);
             int deer = Animal.All.Count(a => a.Alive && a.Species == Species.Deer);
             int boar = Animal.All.Count(a => a.Alive && a.Species == Species.Boar);
+            var stay = KnowledgeSystem.Def(KnowledgeId.Sedentism);
             daily.AppendLine(string.Join(",", new object[] {
-                c.TotalDays, c.ShortStamp, t.People.Count, t.Adults, t.People.Count - t.Adults,
+                c.TotalDays, c.ShortStamp, t.HasCamp ? t.CurrentCamp.Name : "-", t.Moving, t.Returns, (ks.InsightOf(KnowledgeId.Sedentism) / stay.Insight * 100f).ToString("0"), t.People.Count, t.Adults, t.People.Count - t.Adults,
                 t.Stock(Res.Food).ToString("0"), t.FoodDays.ToString("0.0"), t.Stock(Res.Wood).ToString("0"), t.Stock(Res.Flint).ToString("0"),
                 t.Stock(Res.Hide).ToString("0"), t.Stock(Res.Spear).ToString("0"), t.Stock(Res.Cloak).ToString("0"), t.Faith.ToString("0"),
                 t.ShelterSpaces, built, plans, fuel.ToString("0.0"), t.Deaths, t.Births,
@@ -319,7 +330,8 @@ public static class Harness
             sb.AppendLine("Stores: food " + t.Stock(Res.Food).ToString("0") + ", wood " + t.Stock(Res.Wood).ToString("0") + ", flint " + t.Stock(Res.Flint).ToString("0") +
                           ", hides " + t.Stock(Res.Hide).ToString("0") + ", spears " + t.Stock(Res.Spear).ToString("0") + ", cloaks " + t.Stock(Res.Cloak).ToString("0") + ", faith " + t.Faith.ToString("0"));
             sb.AppendLine("Buildings: " + string.Join(", ", Building.All.GroupBy(b => b.Def.Name + (b.Built ? "" : " (plan)")).Select(g => g.Key + " x" + g.Count())));
-            sb.AppendLine("Era: " + KnowledgeSystem.Instance.CurrentEra);
+            sb.AppendLine("Era: " + KnowledgeSystem.Instance.CurrentEra + (t.Settled ? " (settled)" : ""));
+            sb.AppendLine("Camps: " + string.Join("; ", t.Camps.Select(x => x.Name + " [" + x.Kind + ", stays " + x.TimesUsed + ", score " + (x.Report != null ? (x.Report.Total * 100f).ToString("0") : "?") + "]")) + ". Returns " + t.Returns);
             sb.AppendLine("Knowledge:");
             foreach (var d in KnowledgeSystem.Defs.Where(d => d.Implemented))
                 sb.AppendLine("  " + d.Name + ": " + KnowledgeSystem.Instance.StatusOf(d.Id) + ", knowers " + KnowledgeSystem.Instance.KnowersOf(d.Id) +

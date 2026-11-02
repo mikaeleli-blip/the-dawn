@@ -48,8 +48,8 @@ namespace TheDawn
                         Visuals.Part(PrimitiveType.Sphere, visual.transform, new Vector3(0.5f, 3.2f * s, 0.3f), new Vector3(1.6f, 1.8f, 1.6f) * s, leaf * 0.9f);
                     break;
                 case ResourceType.BerryBush:
-                    Max = 6f;
-                    Amount = Random.Range(2f, 6f);
+                    Max = 8f;
+                    Amount = Random.Range(3f, 8f);
                     Visuals.Part(PrimitiveType.Sphere, visual.transform, new Vector3(0, 0.45f, 0), new Vector3(1.3f, 0.9f, 1.3f) * s, new Color(0.18f, 0.32f, 0.14f));
                     berries = new GameObject("Berries");
                     berries.transform.SetParent(visual.transform, false);
@@ -91,7 +91,7 @@ namespace TheDawn
             switch (Type)
             {
                 case ResourceType.BerryBush:
-                    float regrow = season == Season.Summer ? 1.6f : season == Season.Autumn ? 1.1f : season == Season.Spring ? 0.4f : 0f;
+                    float regrow = season == Season.Summer ? 2f : season == Season.Autumn ? 1.6f : season == Season.Spring ? 0.6f : 0f; // autumn: nuts and late fruit
                     if (OmenSystem.Instance != null && OmenSystem.Instance.IsActive(OmenType.BountifulEarth)) regrow *= 2f;
                     Amount = Mathf.Min(Max, Amount + regrow);
                     // Winter frost ruins what is left on the bush.

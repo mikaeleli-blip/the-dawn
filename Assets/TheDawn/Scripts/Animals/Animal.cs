@@ -70,7 +70,7 @@ namespace TheDawn
         public Vector3 Position { get { return transform.position; } }
         public string SpeciesName { get { return Species.ToString(); } }
 
-        public float FoodYield { get { return Species == Species.Deer ? 10f : Species == Species.Boar ? 9f : 4f; } }
+        public float FoodYield { get { return Species == Species.Deer ? 12f : Species == Species.Boar ? 10f : 4f; } }
         public float HideYield { get { return Species == Species.Boar ? 1f : 1f; } }
         float WalkSpeed { get { return Species == Species.Wolf ? 2.6f : Species == Species.Boar ? 1.6f : 1.8f; } }
         float RunSpeed { get { return Species == Species.Wolf ? 7f : Species == Species.Boar ? 5f : 7.5f; } }

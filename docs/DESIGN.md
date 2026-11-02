@@ -68,6 +68,31 @@ Simulated in depth, like RimWorld.
 - Elders are the tribe's memory: they teach knowledge at the fire in the
   evenings.
 
+## Seasonal camps (Wanderers era)
+
+Until the band discovers **Staying Put**, it moves **twice a year**: to a
+warm-season camp at the start of spring, and to a winter camp at the start of
+autumn.
+
+- **The spirit marks a site; the elders judge it.** The elders look at water,
+  berry bushes, firewood, flint, nearby herds, wolf dens and flat ground. Warm
+  camps want water and berries; winter camps want wood, game and shelter from
+  the wind (a winter camp among trees is 3°C warmer). If the elders reject a
+  site, they return to a camp they know or choose a place themselves.
+- **Each camp keeps its own stores.** On moving day everyone packs what they can
+  carry and walks. Whatever is left behind is fetched over the next few days, or
+  waits at the old camp until the band comes back. Unguarded food spoils faster
+  unless the camp has a storage pit.
+- **Old camps are left standing.** Lean-tos, hide huts and drying racks slowly
+  fall apart while a camp stands empty. When the band returns, builders repair
+  what's left. Fires, pits, knapping spots and spirit stones last.
+- **Staying Put** needs Food Drying, Storage Pits and Hide Working first. After
+  that it grows mostly from seasons lived at the band's camps (stories at the
+  fire add a little), and faster each time the band returns to a camp it knows
+  (up to 2.5x). In playtests it arrives around year 7–11, typically ~8.
+- **Settling:** once Staying Put is known, the player chooses a camp and the
+  band settles there for good. That ends the Wanderers era (~8 game years).
+
 ## Knowledge and progression
 
 Learning works through a mix of doing and a tech tree:
@@ -146,8 +171,9 @@ continues** (a wandering band or survivors from a neighbour take over).
 - One temperate biome: a procedural 1 km × 1 km valley with a river, two lakes,
   forests and hills. About 3,500 trees, 900 berry bushes, 14 deer herds, 7 boar
   groups and 4 wolf packs.
-- A nomadic band of 8 (adults, an elder, children). **Goal:** found a camp
-  (place a Campfire), shelter everyone, and **survive the first winter**.
+- A nomadic band of 8 (adults, an elder, children). Goals: make the first
+  camp, shelter everyone, survive the first winter, move between seasonal camps,
+  and discover **Staying Put** (~8 years) to settle for good.
 - Foraging (seasonal berries), wood and flint gathering, food spoiling.
 - Simulated hunting of deer and boar.
 - Wolf packs that get bolder at night and in winter; fire keeps them away.

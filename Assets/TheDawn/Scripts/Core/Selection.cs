@@ -37,7 +37,7 @@ namespace TheDawn
                 ring.transform.position = Selected.transform.position + Vector3.up * 0.05f;
             }
 
-            if (BuildPlacer.Instance.Placing != null) return;
+            if (BuildPlacer.Instance.Active) return;
             if (InputShim.Down(GameKey.Escape)) Clear();
             if (!InputShim.MouseDown(0) || GameHUD.PointerOverUI) return;
 

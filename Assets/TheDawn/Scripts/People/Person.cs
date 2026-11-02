@@ -30,6 +30,7 @@ namespace TheDawn
         public float Mood = 55f;
         public float Health = 100f;
         public float Grief;     // decays over days
+        bool starvingWarned;
 
         // ---------- Work ----------
         public Role Role = Role.None;
@@ -38,10 +39,12 @@ namespace TheDawn
         public Res CarryType;
         public float CarryAmount;
         public bool Alive = true;
+        public bool Migrated = true;          // false while the band is moving and this person hasn't arrived
+        readonly float[] pack = new float[6]; // goods carried during a move or haul
         public float DaysAsRole;
 
         // ---------- Brain ----------
-        public enum JobKind { Idle, Wander, Eat, Sleep, Warm, Flee, Fight, Harvest, Hunt, Build, Craft, Fuel, Gather, Play, SelfForage }
+        public enum JobKind { Idle, Wander, Eat, Sleep, Warm, Flee, Fight, Harvest, Hunt, Build, Craft, Fuel, Gather, Play, SelfForage, Migrate, Haul, Repair }
         public JobKind Job = JobKind.Idle;
         public string JobText = "Idle";
         int phase;
@@ -148,6 +151,7 @@ namespace TheDawn
         {
             // Only interrupt low-stakes jobs for urgent needs.
             if (Job == JobKind.Flee || Job == JobKind.Fight || Job == JobKind.Eat || Job == JobKind.Sleep) return false;
+            if (T.Moving && !Migrated && Job != JobKind.Migrate) return true;
             return Hunger < 25f || (Warmth < 25f && Job != JobKind.Warm) || (C.IsNight && Job != JobKind.Sleep && Rest < 60f);
         }
 
@@ -158,7 +162,7 @@ namespace TheDawn
                 shownRole = Role;
                 bodyRenderer.sharedMaterial = Visuals.Mat(PeopleInfo.RoleColor(Role));
             }
-            carryCube.SetActive(CarryAmount > 0.01f);
+            carryCube.SetActive(CarryAmount > 0.01f || PackTotal > 0.01f);
             spearVis.SetActive(HasSpear && !sleeping);
             body.transform.localRotation = sleeping ? Quaternion.Euler(90f, 0f, 0f) : Quaternion.identity;
             body.transform.localPosition = sleeping ? new Vector3(0f, 0.25f, -0.8f) : Vector3.zero;
@@ -173,9 +177,11 @@ namespace TheDawn
             float t = C.Temperature;
             t += 4f; // everyone wears furs and skins
             if (Building.NearestLitFire(Position, Building.FireWarmRadius) != null) t += 10f;
+            if (T.HasCamp && T.CurrentCamp.Report != null && T.CurrentCamp.Report.Sheltered && T.CurrentCamp.Kind == CampKind.Winter
+                && (Position - T.CurrentCamp.Center).sqrMagnitude < 35f * 35f) t += 3f; // out of the wind among the trees
             if (sleeping && building != null && building.Built && building.Def.ShelterWarmth > 0f)
             {
-                t += building.Def.ShelterWarmth;
+                t += building.ShelterWarmth;
                 t += Mathf.Min(6f, Mathf.Max(0, building.Sleepers.Count - 1) * 1.5f); // body heat
             }
             if (HasCloak) t += 10f;
@@ -196,8 +202,10 @@ namespace TheDawn
             Warmth = Mathf.Clamp(Warmth + dw * dh, 0f, 100f);
 
             // Health
+            if (Hunger <= 0f && !starvingWarned && IsAdult) { starvingWarned = true; EventLog.Add(Name + " is starving.", LogKind.Danger); }
+            if (Hunger > 30f) starvingWarned = false;
             float dmg = 0f;
-            if (Hunger <= 0f) dmg += 4f;
+            if (Hunger <= 0f) dmg += 2f; // starving takes a couple of days to kill
             if (Warmth <= 0f) dmg += 6f;
             if (dmg > 0f) Damage(dmg * dh, Hunger <= 0f ? "starvation" : "the cold", null);
             else if (Hunger > 30f && Warmth > 30f && Health < 100f)
@@ -273,7 +281,7 @@ namespace TheDawn
         {
             get
             {
-                float c = 4f;
+                float c = 5f;
                 if (Has(Trait.Strong)) c += 2f;
                 if (IsChild) c = 1.5f;
                 return c;
@@ -365,8 +373,22 @@ namespace TheDawn
             prey = null;
         }
 
+        public float PackTotal
+        {
+            get { float t = 0f; foreach (var v in pack) t += v; return t; }
+        }
+
         void Think()
         {
+            // Goods still on someone's back go to the current camp.
+            if (PackTotal > 0.01f && Job == JobKind.Idle && !(T.Moving && !Migrated))
+            {
+                StartJob(JobKind.Migrate, "Carrying goods to " + (T.HasCamp ? T.CurrentCamp.Name : "camp"));
+                phase = 1;
+                dest = W.RandomLandPointNear(T.CampPosition, 4f);
+                return;
+            }
+
             // Drop anything carried at the stockpile first.
             if (CarryAmount > 0.01f && Job == JobKind.Idle)
             {
@@ -396,6 +418,13 @@ namespace TheDawn
                 return;
             }
 
+            // The band is moving camp: pack up and walk.
+            if (T.Moving && !Migrated)
+            {
+                StartJob(JobKind.Migrate, "Moving to " + T.CurrentCamp.Name);
+                return;
+            }
+
             // An interrupt only handles urgent needs; otherwise keep doing the current job.
             if (Job != JobKind.Idle) return;
 
@@ -421,7 +450,7 @@ namespace TheDawn
                 case Role.Elder: ThinkElder(); break;
                 case Role.Forager: if (!TryForage()) Loiter(); break;
                 case Role.Hunter: if (!TryHunt()) if (!TryForage()) Loiter(); break;
-                case Role.Gatherer: if (!TryGatherMaterials()) Loiter(); break;
+                case Role.Gatherer: if (!TryHaul()) if (!TryGatherMaterials()) Loiter(); break;
                 case Role.Builder: if (!TryBuild()) if (!TryGatherMaterials()) Loiter(); break;
                 case Role.Crafter: if (!TryCraft()) if (!TryGatherMaterials()) Loiter(); break;
                 case Role.Firekeeper:
@@ -457,6 +486,7 @@ namespace TheDawn
 
         void Loiter()
         {
+            if (IsAdult && TryHaul()) return;
             StartJob(JobKind.Wander, "Idle");
             dest = W.RandomLandPointNear(T.CampPosition, 10f);
             timer = Random.Range(3f, 8f);
@@ -552,9 +582,25 @@ namespace TheDawn
         bool TryBuild()
         {
             var b = Building.NextToBuild(Position);
-            if (b == null) return false;
-            StartJob(JobKind.Build, "Building a " + b.Def.Name.ToLower());
-            building = b;
+            if (b != null)
+            {
+                StartJob(JobKind.Build, "Building a " + b.Def.Name.ToLower());
+                building = b;
+                return true;
+            }
+            var r = Building.NextToRepair(Position);
+            if (r == null) return false;
+            StartJob(JobKind.Repair, "Repairing the " + r.Def.Name.ToLower());
+            building = r;
+            return true;
+        }
+
+        /// <summary>After a move, fetch what was left behind at the old camp.</summary>
+        bool TryHaul()
+        {
+            var src = T.HaulSource;
+            if (src == null || T.Moving) return false;
+            StartJob(JobKind.Haul, "Fetching goods from " + src.Name);
             return true;
         }
 
@@ -578,7 +624,7 @@ namespace TheDawn
             else return false;
 
             StartJob(JobKind.Craft, wantRes == Res.Spear ? "Knapping a spear" : wantRes == Res.Cloak ? "Sewing a hide cloak" : "Scraping and stretching a hide");
-            var spot = Building.NearestBuilt(BuildingType.KnappingSpot, Position, 200f);
+            var spot = T.NearestInCamp(BuildingType.KnappingSpot, Position);
             dest = spot != null ? spot.transform.position + Random.insideUnitSphere * 1.5f : T.StockpilePoint(Position);
             dest = W.OnGround(dest);
             return true;
@@ -591,7 +637,7 @@ namespace TheDawn
             float lowest = threshold;
             foreach (var b in Building.All)
             {
-                if (!b.Built || b.Def.Type != BuildingType.Campfire) continue;
+                if (!b.Built || b.Def.Type != BuildingType.Campfire || !T.InCurrentCamp(b)) continue;
                 float f = b.Fuel / Building.MaxFuel;
                 if (f < lowest) { lowest = f; low = b; }
             }
@@ -669,6 +715,9 @@ namespace TheDawn
                 case JobKind.Build: RunBuild(); break;
                 case JobKind.Craft: RunCraft(); break;
                 case JobKind.Fuel: RunFuel(); break;
+                case JobKind.Migrate: RunMigrate(); break;
+                case JobKind.Haul: RunHaul(); break;
+                case JobKind.Repair: RunRepair(); break;
             }
         }
 
@@ -838,14 +887,15 @@ namespace TheDawn
                 case 1: // work
                     if (node == null || !node.Available) { phase = CarryAmount > 0f ? 2 : 0; if (phase == 0) Finish(); return; }
                     Skill sk = node.Type == ResourceType.BerryBush ? Skill.Foraging : (node.Type == ResourceType.Tree ? Skill.Woodcutting : Skill.Crafting);
-                    float seconds = node.Type == ResourceType.BerryBush ? 2.2f : (node.Type == ResourceType.Tree ? 3.5f : 4f);
+                    float seconds = node.Type == ResourceType.BerryBush ? 1.6f : (node.Type == ResourceType.Tree ? 3.5f : 4f);
                     timer += Time.deltaTime * WorkSpeed(sk);
                     if (timer >= seconds)
                     {
                         timer = 0f;
                         CarryAmount += node.Take(1f);
                         Practice(sk, seconds);
-                        if (CarryAmount >= CarryCapacity || !node.Available)
+                        // Berries and nuts go in a basket, so foragers carry more.
+                        if (CarryAmount >= CarryCapacity * (CarryType == Res.Food ? 1.6f : 1f) || !node.Available)
                         {
                             if (node.ReservedBy == this) node.ReservedBy = null;
                             phase = 2;
@@ -1038,6 +1088,66 @@ namespace TheDawn
                 Practice(Skill.Lore, 1f);
                 Finish();
             }
+        }
+
+        void RunMigrate()
+        {
+            var from = T.MovingFrom;
+            var to = T.CurrentCamp;
+            if (to == null) { Migrated = true; Finish(); return; }
+            if (phase == 0)
+            {
+                // Pack up at the old camp, unless already far from it.
+                if (from == null || (Position - from.Center).sqrMagnitude > 150f * 150f)
+                {
+                    phase = 1;
+                    dest = W.RandomLandPointNear(to.Center, 5f);
+                    return;
+                }
+                if (!MoveTo(from.Center, 2f)) return;
+                if (CarryAmount > 0f) { from.Stock[(int)CarryType] += CarryAmount; CarryAmount = 0f; }
+                T.PackFrom(from, pack, CarryCapacity * 2f, true);
+                phase = 1;
+                dest = W.RandomLandPointNear(to.Center, 5f);
+                JobText = "Walking to " + to.Name + (PackTotal > 0.5f ? " with a heavy pack" : "");
+            }
+            if (phase == 1)
+            {
+                if (!MoveTo(dest, 1.2f)) return;
+                T.Unpack(pack);
+                if (CarryAmount > 0f) { T.Add(CarryType, CarryAmount); CarryAmount = 0f; }
+                Migrated = true;
+                Finish();
+            }
+        }
+
+        void RunHaul()
+        {
+            var src = T.HaulSource;
+            if (phase == 0)
+            {
+                if (src == null) { Finish(); return; }
+                if (!MoveTo(src.Center, 2f)) return;
+                T.PackFrom(src, pack, CarryCapacity * 1.5f, false);
+                if (PackTotal < 0.01f) { Finish(); return; }
+                phase = 1;
+                dest = W.RandomLandPointNear(T.CampPosition, 4f);
+                JobText = "Carrying goods back from " + src.Name;
+            }
+            if (phase == 1)
+            {
+                if (!MoveTo(dest, 1.2f, 0.85f)) return;
+                T.Unpack(pack);
+                Finish();
+            }
+        }
+
+        void RunRepair()
+        {
+            if (building == null || !building.NeedsRepair && building.Condition >= 1f) { Finish(); return; }
+            if (!MoveTo(building.transform.position, building.Def.Radius + 0.8f)) return;
+            Practice(Skill.Building, Time.deltaTime);
+            if (building.Repair(Time.deltaTime * WorkSpeed(Skill.Building))) Finish();
         }
 
         // =====================================================================

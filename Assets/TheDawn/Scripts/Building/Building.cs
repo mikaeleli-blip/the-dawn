@@ -71,9 +71,11 @@ namespace TheDawn
         public const float FireScareRadius = 16f;
 
         public BuildingDef Def;
+        public Camp Camp;               // the camp this was built at
         public bool Built;
         public float Progress;
         public float Fuel;
+        public float Condition = 1f;    // falls while the camp stands empty; repaired on return
         public readonly List<Person> Sleepers = new List<Person>();
         readonly float[] delivered = new float[6];
 
@@ -91,6 +93,7 @@ namespace TheDawn
             go.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
             var b = go.AddComponent<Building>();
             b.Def = def;
+            b.Camp = Tribe.Instance != null ? (Tribe.Instance.CurrentCamp ?? Tribe.Instance.CampAt(pos)) : null;
             var col = go.AddComponent<BoxCollider>();
             col.size = new Vector3(def.Radius * 1.8f, 1.5f, def.Radius * 1.8f);
             col.center = new Vector3(0f, 0.75f, 0f);
@@ -229,12 +232,64 @@ namespace TheDawn
             Destroy(gameObject);
         }
 
+        // ---------- Decay and repair ----------
+
+        /// <summary>Days an empty camp's building lasts before falling apart (0 = it lasts).</summary>
+        float LifetimeDays
+        {
+            get
+            {
+                int year = GameClock.Instance.DaysPerYear;
+                switch (Def.Type)
+                {
+                    case BuildingType.LeanTo: return year * 0.75f;
+                    case BuildingType.HideHut: return year * 2f;
+                    case BuildingType.DryingRack: return year * 1.25f;
+                    default: return 0f;
+                }
+            }
+        }
+
+        public bool Decays { get { return LifetimeDays > 0f; } }
+
+        public float ShelterWarmth { get { return Def.ShelterWarmth * (0.4f + 0.6f * Condition); } }
+
+        public void DailyDecay()
+        {
+            if (!Decays) return;
+            if (!Built)
+            {
+                // Abandoned plans are forgotten after a while.
+                Condition -= 1f / (GameClock.Instance.DaysPerYear * 0.5f);
+                if (Condition <= 0f) Cancel();
+                return;
+            }
+            Condition -= 1f / LifetimeDays;
+            if (Condition <= 0f)
+            {
+                EventLog.Add("The old " + Def.Name.ToLower() + " at " + (Camp != null ? Camp.Name : "an old camp") + " has fallen apart.");
+                Destroy(gameObject);
+                return;
+            }
+            RefreshLook();
+        }
+
+        public bool NeedsRepair { get { return Built && Decays && Condition < 0.9f; } }
+
+        /// <summary>Adds repair work; returns true when it's as good as new.</summary>
+        public bool Repair(float seconds)
+        {
+            Condition = Mathf.Min(1f, Condition + seconds / Mathf.Max(4f, Def.Work * 0.5f));
+            RefreshLook();
+            return Condition >= 1f;
+        }
+
         void RefreshLook()
         {
             if (visual == null) return;
             if (Built)
             {
-                visual.transform.localScale = Vector3.one;
+                visual.transform.localScale = new Vector3(1f, Decays ? Mathf.Lerp(0.55f, 1f, Condition) : 1f, 1f);
                 foreach (var r in visual.GetComponentsInChildren<Renderer>()) r.enabled = true;
             }
             else
@@ -271,7 +326,7 @@ namespace TheDawn
             float burn = clock.DeltaHours / 4f * (clock.Temperature < 0f ? 1.4f : 1f);
             bool wasLit = Fuel > 0f;
             Fuel = Mathf.Max(0f, Fuel - burn);
-            if (wasLit && Fuel <= 0f) EventLog.Add("A campfire has gone out.", LogKind.Warning);
+            if (wasLit && Fuel <= 0f && Tribe.Instance.InCurrentCamp(this) && !Tribe.Instance.Moving) EventLog.Add("A campfire has gone out.", LogKind.Warning);
 
             if (flame == null)
             {
@@ -330,6 +385,19 @@ namespace TheDawn
             return best;
         }
 
+        /// <summary>The most worn building at the current camp, if any needs work.</summary>
+        public static Building NextToRepair(Vector3 from)
+        {
+            Building best = null;
+            float worst = 0.9f;
+            foreach (var b in All)
+            {
+                if (!b.NeedsRepair || !Tribe.Instance.InCurrentCamp(b)) continue;
+                if (b.Condition < worst) { worst = b.Condition; best = b; }
+            }
+            return best;
+        }
+
         public static bool AnyBuilt(BuildingType t)
         {
             foreach (var b in All) if (b.Built && b.Def.Type == t) return true;
@@ -343,7 +411,7 @@ namespace TheDawn
             float bestScore = float.MaxValue;
             foreach (var b in All)
             {
-                if (b.Built) continue;
+                if (b.Built || !Tribe.Instance.InCurrentCamp(b)) continue;
                 Res need;
                 bool canProgress = !b.MissingMaterial(out need) || Tribe.Instance.Stock(need) >= 1f;
                 if (!canProgress) continue;

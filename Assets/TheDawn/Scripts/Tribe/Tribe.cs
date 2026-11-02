@@ -6,32 +6,60 @@ namespace TheDawn
     public enum PriorityCat { Food, Materials, Building, Crafting }
     public enum PriorityLevel { Low, Normal, High }
 
-    /// <summary>The band as a whole: people, shared stores, camp, faith, priorities, life events.</summary>
+    /// <summary>
+    /// The band as a whole: people, camps and their stores, seasonal moves, faith,
+    /// priorities and life events.
+    /// </summary>
     public class Tribe : MonoBehaviour
     {
         public static Tribe Instance { get; private set; }
 
         public string TribeName = "The Band";
         public readonly List<Person> People = new List<Person>();
-        readonly float[] stock = new float[6];
         public PriorityLevel[] Priorities = { PriorityLevel.Normal, PriorityLevel.Normal, PriorityLevel.Normal, PriorityLevel.Normal };
         public float Faith = 5f;
-        public bool HasCamp;
-        public Vector3 CampPosition;
         public int Deaths;
         public int Births;
         public bool SurvivedFirstWinter;
 
+        // ---------- Camps ----------
+        public readonly List<Camp> Camps = new List<Camp>();
+        public Camp CurrentCamp { get; private set; }
+        public Camp MovingFrom { get; private set; }
+        public bool Moving { get; private set; }
+        public bool Settled { get; private set; }
+        public int Returns { get; private set; }
+        public Camp HaulSource { get; private set; }
+        public Vector3? MarkedSite { get; private set; }
+        public SiteReport MarkedReport { get; private set; }
+
+        readonly float[] bandStock = new float[6]; // carried bundles before the first camp
         GameObject bundle;
+        GameObject marker;
         Transform peopleRoot;
+        Transform campsRoot;
+        bool movePending;
+        float moveStartedAt;
+        float haulUntil;
+        bool hintedThisSeason;
+
+        public bool HasCamp { get { return CurrentCamp != null; } }
+        public Vector3 CampPosition { get { return CurrentCamp != null ? CurrentCamp.Center : bundle.transform.position; } }
+        float[] stock { get { return CurrentCamp != null ? CurrentCamp.Stock : bandStock; } }
+        float Now { get { var c = GameClock.Instance; return c.TotalDays + c.Hour / 24f; } }
+
+        /// <summary>Returning to known camps teaches the band that the land can keep them. Speeds up Staying Put.</summary>
+        public float FamiliarityMultiplier { get { return Mathf.Min(2.5f, 1f + Returns * 0.15f); } }
 
         void Awake() { Instance = this; }
 
         public void Init(Vector3 start)
         {
-            CampPosition = start;
+            CampSites.ResetNames();
             peopleRoot = new GameObject("People").transform;
             peopleRoot.SetParent(transform, false);
+            campsRoot = new GameObject("Camps").transform;
+            campsRoot.SetParent(transform, false);
 
             // The band's bundles: their shared belongings before they have a camp.
             bundle = new GameObject("Bundles");
@@ -40,10 +68,10 @@ namespace TheDawn
             Visuals.Part(PrimitiveType.Cube, bundle.transform, new Vector3(0, 0.25f, 0), new Vector3(0.9f, 0.5f, 0.6f), new Color(0.45f, 0.33f, 0.22f));
             Visuals.Part(PrimitiveType.Cube, bundle.transform, new Vector3(0.6f, 0.2f, 0.3f), new Vector3(0.6f, 0.4f, 0.5f), new Color(0.5f, 0.4f, 0.28f));
 
-            stock[(int)Res.Food] = 24f;
-            stock[(int)Res.Wood] = 4f;
-            stock[(int)Res.Flint] = 2f;
-            stock[(int)Res.Spear] = 1f;
+            bandStock[(int)Res.Food] = 24f;
+            bandStock[(int)Res.Wood] = 4f;
+            bandStock[(int)Res.Flint] = 2f;
+            bandStock[(int)Res.Spear] = 1f;
 
             // Starting band: an elder, five adults, two children.
             SpawnStarting(Sex.Female, Random.Range(53f, 58f));
@@ -91,7 +119,7 @@ namespace TheDawn
             b.Partner = a;
         }
 
-        // ---------- Stores ----------
+        // ---------- Stores (the current camp's) ----------
 
         public float Stock(Res r) { return stock[(int)r]; }
         public void Add(Res r, float amount) { stock[(int)r] += amount; }
@@ -106,14 +134,17 @@ namespace TheDawn
         public float Need(Res r)
         {
             float want = 0f;
+            int fires = 0;
             foreach (var b in Building.All)
+            {
+                if (!InCurrentCamp(b)) continue;
                 if (!b.Built) want += b.Remaining(r);
+                else if (b.Def.Type == BuildingType.Campfire) fires++;
+            }
             if (r == Res.Wood)
             {
-                int fires = 0;
-                foreach (var b in Building.All) if (b.Built && b.Def.Type == BuildingType.Campfire) fires++;
                 float reserve = GameClock.Instance.Season == Season.Autumn || GameClock.Instance.Season == Season.Winter ? 30f : 12f;
-                want += fires * reserve;
+                want += Mathf.Max(1, fires) * reserve;
             }
             if (r == Res.Flint) want += 4f;
             return Mathf.Max(0f, want - Stock(r));
@@ -129,10 +160,34 @@ namespace TheDawn
             }
         }
 
+        public bool InCurrentCamp(Building b)
+        {
+            return b.Camp == CurrentCamp || (b.Camp == null && CurrentCamp == null);
+        }
+
         public Vector3 StockpilePoint(Vector3 from)
         {
-            var pit = Building.NearestBuilt(BuildingType.StoragePit, from, 1000f);
+            var pit = NearestInCamp(BuildingType.StoragePit, from);
             return pit != null ? pit.transform.position : CampPosition;
+        }
+
+        public Building NearestInCamp(BuildingType t, Vector3 from)
+        {
+            Building best = null;
+            float bestD = float.MaxValue;
+            foreach (var b in Building.All)
+            {
+                if (!b.Built || b.Def.Type != t || !InCurrentCamp(b)) continue;
+                float d = (b.transform.position - from).sqrMagnitude;
+                if (d < bestD) { bestD = d; best = b; }
+            }
+            return best;
+        }
+
+        public bool CampHas(Camp camp, BuildingType t)
+        {
+            foreach (var b in Building.All) if (b.Built && b.Camp == camp && b.Def.Type == t) return true;
+            return false;
         }
 
         public int CountRole(Role r)
@@ -150,16 +205,227 @@ namespace TheDawn
         public float FoodPerDay { get { return People.Count * 1.7f; } }
         public float FoodDays { get { return People.Count == 0 ? 0f : Stock(Res.Food) / FoodPerDay; } }
 
-        // ---------- Camp ----------
+        // ---------- Camps ----------
 
-        public void FoundCamp(Vector3 at)
+        static CampKind KindForSeason(Season s)
+        {
+            return s == Season.Autumn || s == Season.Winter ? CampKind.Winter : CampKind.Warm;
+        }
+
+        /// <summary>The camp a position belongs to (within 100 m), if any.</summary>
+        public Camp CampAt(Vector3 p)
+        {
+            Camp best = null;
+            float bestD = 100f;
+            foreach (var c in Camps)
+            {
+                float d = Vector3.Distance(c.Center, p);
+                if (d < bestD) { bestD = d; best = c; }
+            }
+            return best;
+        }
+
+        Camp NewCamp(Vector3 center, CampKind kind, SiteReport report)
+        {
+            var c = new Camp(World.Instance.OnGround(center), kind, report ?? CampSites.Evaluate(center, kind), campsRoot);
+            Camps.Add(c);
+            return c;
+        }
+
+        /// <summary>The first campfire founds the first camp.</summary>
+        public void FoundCamp(Vector3 firePos)
         {
             if (HasCamp) return;
-            HasCamp = true;
-            CampPosition = at;
-            if (bundle != null) bundle.transform.position = World.Instance.OnGround(at + new Vector3(2.5f, 0f, 1.5f));
-            CampPosition = bundle.transform.position;
-            EventLog.Add("The band has chosen a place to make camp.", LogKind.Good);
+            var kind = KindForSeason(GameClock.Instance.Season);
+            Vector3 center = World.Instance.OnGround(firePos + new Vector3(2.5f, 0f, 1.5f));
+            var camp = NewCamp(center, kind, null);
+            for (int i = 0; i < bandStock.Length; i++) { camp.Stock[i] = bandStock[i]; bandStock[i] = 0f; }
+            camp.TimesUsed = 1;
+            camp.LastUsedYear = GameClock.Instance.Year;
+            CurrentCamp = camp;
+            foreach (var b in Building.All) if (b.Camp == null) b.Camp = camp;
+            if (bundle != null) bundle.SetActive(false);
+            EventLog.Add("The band has made its " + camp.KindName + ": " + camp.Name + ".", LogKind.Good);
+        }
+
+        public void MarkSite(Vector3 p)
+        {
+            MarkedSite = World.Instance.OnGround(p);
+            var kind = HasCamp ? (CurrentCamp.Kind == CampKind.Warm ? CampKind.Winter : CampKind.Warm) : KindForSeason(GameClock.Instance.Season);
+            MarkedReport = CampSites.Evaluate(MarkedSite.Value, kind);
+            if (marker == null)
+            {
+                marker = new GameObject("Camp Marker");
+                Visuals.Part(PrimitiveType.Cylinder, marker.transform, new Vector3(0, 1.5f, 0), new Vector3(0.12f, 1.5f, 0.12f), new Color(0.85f, 0.8f, 0.7f));
+                Visuals.Part(PrimitiveType.Sphere, marker.transform, new Vector3(0, 0.25f, 0), new Vector3(1.2f, 0.5f, 1.2f), new Color(0.5f, 0.5f, 0.52f));
+                Visuals.Part(PrimitiveType.Cube, marker.transform, new Vector3(0.25f, 2.7f, 0), new Vector3(0.5f, 0.35f, 0.04f), new Color(0.75f, 0.3f, 0.2f));
+            }
+            marker.transform.position = MarkedSite.Value;
+            marker.SetActive(true);
+            EventLog.Add("The spirit marks a place for the next camp. " + MarkedReport.Verdict);
+        }
+
+        public void ClearMark()
+        {
+            MarkedSite = null;
+            MarkedReport = null;
+            if (marker != null) marker.SetActive(false);
+        }
+
+        /// <summary>In-game days until the next seasonal move (or -1 if the band has settled / has no camp).</summary>
+        public float DaysUntilMove
+        {
+            get
+            {
+                if (!HasCamp || Settled) return -1f;
+                var c = GameClock.Instance;
+                int seasonsAhead = c.Season == Season.Spring || c.Season == Season.Autumn ? 2 : 1;
+                return seasonsAhead * c.DaysPerSeason - (c.DayOfSeason - 1) - c.Hour / 24f + 7f / 24f;
+            }
+        }
+
+        void Update()
+        {
+            var clock = GameClock.Instance;
+            if (clock == null) return;
+
+            if (movePending && clock.Hour >= 7f && clock.Hour < 18f)
+            {
+                movePending = false;
+                BeginMove();
+            }
+
+            if (Moving)
+            {
+                bool all = true;
+                foreach (var p in People) if (!p.Migrated) { all = false; break; }
+                if (all || Now - moveStartedAt > 1.5f)
+                {
+                    Moving = false;
+                    foreach (var p in People) p.Migrated = true;
+                    EventLog.Add("The band has settled into " + CurrentCamp.Name + ".", LogKind.Good);
+                    if (MovingFrom != null && MovingFrom.StockTotal(false) >= 3f && Vector3.Distance(MovingFrom.Center, CurrentCamp.Center) < 500f)
+                    {
+                        HaulSource = MovingFrom;
+                        haulUntil = Now + 4f;
+                    }
+                    MovingFrom = null;
+                    RoleAssigner.Instance.Reassign();
+                }
+            }
+
+            if (HaulSource != null && (Moving || Now > haulUntil || HaulSource.StockTotal(false) < 2f || HaulSource == CurrentCamp))
+                HaulSource = null;
+        }
+
+        void BeginMove()
+        {
+            if (!HasCamp || Settled || People.Count == 0) return;
+            var kind = KindForSeason(GameClock.Instance.Season);
+            if (CurrentCamp.Kind == kind) return;
+
+            Camp dest = null;
+            if (MarkedSite.HasValue)
+            {
+                var existing = CampAt(MarkedSite.Value);
+                float dist = Vector3.Distance(MarkedSite.Value, CurrentCamp.Center);
+                if (existing == CurrentCamp || dist < CampSites.MinMoveDistance)
+                    EventLog.Add("The elders won't move to the marked place: it's the land we already live on.", LogKind.Warning);
+                else if (existing != null)
+                    dest = existing;
+                else if (dist > CampSites.MaxMoveDistance)
+                    EventLog.Add("The elders won't move to the marked place: it's too far to walk with the children and the stores.", LogKind.Warning);
+                else
+                {
+                    var report = CampSites.Evaluate(MarkedSite.Value, kind);
+                    if (report.Acceptable) dest = NewCamp(MarkedSite.Value, kind, report);
+                    else EventLog.Add("The elders refuse the marked place: " + report.Weakness + ".", LogKind.Warning);
+                }
+            }
+
+            if (dest == null)
+            {
+                // Go back to a camp of this kind the band already knows.
+                Camp best = null;
+                foreach (var c in Camps)
+                    if (c != CurrentCamp && c.Kind == kind && (best == null || c.TimesUsed > best.TimesUsed)) best = c;
+                dest = best;
+            }
+
+            if (dest == null)
+            {
+                Vector3 p = CampSites.FindBest(CurrentCamp.Center, kind, Camps);
+                dest = NewCamp(p, kind, null);
+                EventLog.Add("The elders choose a place for the " + dest.KindName + " themselves: " + dest.Name + ".");
+            }
+
+            ClearMark();
+            MovingFrom = CurrentCamp;
+            CurrentCamp = dest;
+            Moving = true;
+            moveStartedAt = Now;
+            HaulSource = null;
+            if (dest.TimesUsed > 0)
+            {
+                Returns++;
+                EventLog.Add("The band returns to " + dest.Name + ", the " + dest.KindName + " they know.", LogKind.Good);
+            }
+            dest.TimesUsed++;
+            dest.LastUsedYear = GameClock.Instance.Year;
+            foreach (var p in People) p.Migrated = false;
+
+            // The band makes a fire wherever it stops.
+            bool hasFire = false;
+            foreach (var b in Building.All) if (b.Camp == dest && b.Def.Type == BuildingType.Campfire) hasFire = true;
+            if (!hasFire)
+            {
+                Vector3 spot;
+                var fireDef = BuildingDef.Get(BuildingType.Campfire);
+                if (BuildPlacer.TryFindSpot(fireDef, dest.Center, 3f, out spot))
+                    BuildPlacer.Instance.CreatePlan(fireDef, spot, 0f);
+            }
+
+            float km = Vector3.Distance(MovingFrom.Center, dest.Center);
+            EventLog.Add("The band packs up and walks " + Mathf.RoundToInt(km) + " m to " + dest.Name + ".", LogKind.Good);
+            RoleAssigner.Instance.Reassign();
+        }
+
+        /// <summary>Fills a pack from a camp's stores, most needed things first.</summary>
+        public void PackFrom(Camp from, float[] pack, float capacity, bool includeWood)
+        {
+            Res[] order = { Res.Food, Res.Spear, Res.Cloak, Res.Wood, Res.Hide, Res.Flint };
+            float room = capacity;
+            foreach (var r in order)
+            {
+                if (r == Res.Wood && !includeWood) continue;
+                float want = r == Res.Wood ? Mathf.Min(room, 2f) : room;
+                float got = Mathf.Min(want, from.Stock[(int)r]);
+                from.Stock[(int)r] -= got;
+                pack[(int)r] += got;
+                room -= got;
+                if (room <= 0.01f) break;
+            }
+        }
+
+        public void Unpack(float[] pack)
+        {
+            for (int i = 0; i < pack.Length; i++) { stock[i] += pack[i]; pack[i] = 0f; }
+        }
+
+        /// <summary>With Staying Put known, the band can make a camp its home for good.</summary>
+        public bool CanSettle
+        {
+            get { return HasCamp && !Settled && !Moving && KnowledgeSystem.Instance.Effect(KnowledgeId.Sedentism) > 0f; }
+        }
+
+        public void Settle()
+        {
+            if (!CanSettle) return;
+            Settled = true;
+            ClearMark();
+            EventLog.Add("The band will stay at " + CurrentCamp.Name + " all year round. The wandering is over.", LogKind.Good);
+            KnowledgeSystem.Instance.OnSettled();
+            Faith += 20f;
         }
 
         public Building FindShelterFor(Person p)
@@ -168,9 +434,9 @@ namespace TheDawn
             float bestScore = float.MinValue;
             foreach (var b in Building.All)
             {
-                if (!b.Built || b.Def.ShelterCapacity <= 0) continue;
+                if (!b.Built || b.Def.ShelterCapacity <= 0 || !InCurrentCamp(b)) continue;
                 if (b.Sleepers.Count >= b.Def.ShelterCapacity && !b.Sleepers.Contains(p)) continue;
-                float score = b.Def.ShelterWarmth - Vector3.Distance(b.transform.position, p.Position) * 0.05f;
+                float score = b.ShelterWarmth - Vector3.Distance(b.transform.position, p.Position) * 0.05f;
                 // Families sleep together.
                 foreach (var s in b.Sleepers) if (s == p.Partner || s == p.Mother || p.Children.Contains(s)) score += 5f;
                 if (score > bestScore) { bestScore = score; best = b; }
@@ -184,7 +450,7 @@ namespace TheDawn
             get
             {
                 int n = 0;
-                foreach (var b in Building.All) if (b.Built) n += b.Def.ShelterCapacity;
+                foreach (var b in Building.All) if (b.Built && InCurrentCamp(b)) n += b.Def.ShelterCapacity;
                 return n;
             }
         }
@@ -219,7 +485,7 @@ namespace TheDawn
             var clock = GameClock.Instance;
             foreach (var p in People.ToArray()) p.OnNewDay();
 
-            // Spoilage
+            // Spoilage, camp by camp.
             float rate;
             switch (clock.Season)
             {
@@ -227,10 +493,20 @@ namespace TheDawn
                 case Season.Winter: rate = 0.015f; break;
                 default: rate = 0.04f; break;
             }
-            if (Building.AnyBuilt(BuildingType.DryingRack)) rate *= 1f - 0.5f * KnowledgeSystem.Instance.Effect(KnowledgeId.FoodDrying);
-            if (Building.AnyBuilt(BuildingType.StoragePit)) rate *= 0.6f;
-            float spoiled = stock[(int)Res.Food] * rate;
-            stock[(int)Res.Food] -= spoiled;
+            float drying = KnowledgeSystem.Instance.Effect(KnowledgeId.FoodDrying);
+            foreach (var c in Camps)
+            {
+                float r = rate;
+                if (CampHas(c, BuildingType.DryingRack)) r *= 1f - 0.5f * drying;
+                if (CampHas(c, BuildingType.StoragePit)) r *= 0.6f;
+                if (c != CurrentCamp && !CampHas(c, BuildingType.StoragePit)) r *= 1.5f; // unguarded food: animals get at it
+                c.Stock[(int)Res.Food] -= c.Stock[(int)Res.Food] * r;
+            }
+            if (!HasCamp) bandStock[(int)Res.Food] -= bandStock[(int)Res.Food] * rate;
+
+            // Buildings at camps nobody is living at slowly fall apart.
+            foreach (var b in Building.All.ToArray())
+                if (b.Camp != null && b.Camp != CurrentCamp) b.DailyDecay();
 
             foreach (var n in ResourceNode.All) n.DailyTick(clock.Season);
 
@@ -242,17 +518,42 @@ namespace TheDawn
 
             PairUp();
             Births_();
+            SeasonHints();
+            if (People.Count > 0 && HasCamp && FoodDays < 1.5f)
+                EventLog.Add("Food is running low: about " + FoodDays.ToString("0.0") + " days left at " + CurrentCamp.Name + ".", LogKind.Danger);
         }
 
         void SeasonTick()
         {
             var clock = GameClock.Instance;
             World.Instance.RefreshColors(clock.Season);
+            hintedThisSeason = false;
             if (clock.Season == Season.Spring && clock.Year == 2 && People.Count > 0 && !SurvivedFirstWinter)
             {
                 SurvivedFirstWinter = true;
                 EventLog.Add("The band survived its first winter.", LogKind.Good);
                 Faith += 15f;
+            }
+            // Wanderers move twice a year: to a warm-season camp in spring, a winter camp in autumn.
+            if (HasCamp && !Settled && (clock.Season == Season.Spring || clock.Season == Season.Autumn))
+                movePending = true;
+        }
+
+        void SeasonHints()
+        {
+            var c = GameClock.Instance;
+            if (!HasCamp || Settled || hintedThisSeason || MarkedSite.HasValue) return;
+            if (c.DayOfSeason < c.DaysPerSeason - 2) return;
+            if (c.Season == Season.Summer || c.Season == Season.Winter)
+            {
+                var kind = c.Season == Season.Summer ? CampKind.Winter : CampKind.Warm;
+                bool known = false;
+                foreach (var camp in Camps) if (camp.Kind == kind) known = true;
+                hintedThisSeason = true;
+                if (!known)
+                    EventLog.Add(kind == CampKind.Winter
+                        ? "Autumn is near and the band will move to a winter camp. Mark a sheltered place among trees, with game and flint nearby."
+                        : "Spring is near and the band will move to a warm-season camp. Mark a place near water and berries.", LogKind.Warning);
             }
         }
 
@@ -278,7 +579,7 @@ namespace TheDawn
 
         void Births_()
         {
-            if (!HasCamp || FoodDays < 2f) return;
+            if (!HasCamp || Moving || FoodDays < 2f) return;
             foreach (var mother in People.ToArray())
             {
                 if (mother.Sex != Sex.Female || mother.Partner == null || mother.Age < 17f || mother.Age > 40f) continue;

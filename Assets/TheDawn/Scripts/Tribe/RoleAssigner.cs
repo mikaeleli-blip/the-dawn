@@ -100,21 +100,36 @@ namespace TheDawn
         void ComputeDemand(Tribe tribe, GameClock clock)
         {
             float foodDays = tribe.FoodDays;
+            // Outside the growing season nothing regrows: aim to have enough to last until spring.
             float targetDays = 4f;
-            if (clock.Season == Season.Autumn) targetDays = 4f + 10f * clock.SeasonProgress; // stock up for winter
-            if (clock.Season == Season.Winter) targetDays = 3f;
-            float food = Mathf.Clamp(targetDays - foodDays, 0.3f, 8f) * tribe.PriorityMul(PriorityCat.Food);
+            float toSpring = clock.Season == Season.Autumn ? clock.DaysPerSeason * (2f - clock.SeasonProgress)
+                           : clock.Season == Season.Winter ? clock.DaysPerSeason * (1f - clock.SeasonProgress) : 0f;
+            if (toSpring > 0f) targetDays = Mathf.Min(14f, toSpring + 2f);
+            float food = Mathf.Clamp(targetDays - foodDays, 0.3f, 10f) * tribe.PriorityMul(PriorityCat.Food);
+            if (foodDays < 2f) food *= 2f; // hunger comes first
 
             bool winter = clock.Season == Season.Winter;
-            Demand[Role.Forager] = food * (winter ? 0.15f : 1f);
-            Demand[Role.Hunter] = food * (winter ? 1.2f : 0.7f) + 0.4f;
+            // Split food work by what's actually out there: bare bushes send people hunting.
+            float berries = 0f;
+            Vector3 camp = tribe.CampPosition;
+            foreach (var n in ResourceNode.All)
+                if (n.Type == ResourceType.BerryBush && (n.transform.position - camp).sqrMagnitude < 90f * 90f) berries += n.Amount;
+            float forage = Mathf.Clamp(berries / (12f + tribe.People.Count * 4f), 0.1f, 1f);
+            Demand[Role.Forager] = food * forage;
+            Demand[Role.Hunter] = food * (1.3f - forage * 0.6f) + 0.4f;
 
             float materials = (tribe.Need(Res.Wood) / 15f + tribe.Need(Res.Flint) / 8f + 0.3f) * tribe.PriorityMul(PriorityCat.Materials);
+            if (tribe.HaulSource != null) materials += Mathf.Min(3f, tribe.HaulSource.StockTotal(false) / 15f); // fetch what was left behind
             Demand[Role.Gatherer] = Mathf.Min(materials, 6f);
 
-            int plans = 0;
-            foreach (var b in Building.All) if (!b.Built) plans++;
-            Demand[Role.Builder] = plans > 0 ? (0.8f + plans * 0.6f) * tribe.PriorityMul(PriorityCat.Building) : 0f;
+            int plans = 0, repairs = 0;
+            foreach (var b in Building.All)
+            {
+                if (!tribe.InCurrentCamp(b)) continue;
+                if (!b.Built) plans++;
+                else if (b.NeedsRepair) repairs++;
+            }
+            Demand[Role.Builder] = plans + repairs > 0 ? (0.8f + plans * 0.6f + repairs * 0.4f) * tribe.PriorityMul(PriorityCat.Building) : 0f;
 
             float spears = tribe.Stock(Res.Spear);
             foreach (var p in tribe.People) if (p.HasSpear) spears++;
@@ -124,8 +139,7 @@ namespace TheDawn
             if (!hideWork && tribe.Stock(Res.Hide) >= 2f) craftNeed += 0.5f; // someone tinkers with the hides
             Demand[Role.Crafter] = craftNeed * tribe.PriorityMul(PriorityCat.Crafting);
 
-            bool hasFire = false;
-            foreach (var b in Building.All) if (b.Built && b.Def.Type == BuildingType.Campfire) hasFire = true;
+            bool hasFire = tribe.NearestInCamp(BuildingType.Campfire, tribe.CampPosition) != null;
             bool elderTends = tribe.CountRole(Role.Elder) > 0;
             Demand[Role.Firekeeper] = hasFire ? (elderTends ? 0.25f : 0.6f) * (winter ? 2f : 1f) : 0f;
         }

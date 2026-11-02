@@ -65,15 +65,21 @@ namespace TheDawn
                     Animal.Create(g.Species, g, w.RandomLandPointNear(g.Center, 4f), transform);
             }
 
-            int deer = 0, wolfPacks = 0;
+            int deer = 0, boar = 0, wolfPacks = 0;
             foreach (var g in Groups)
             {
                 if (g.Species == Species.Deer && g.AliveCount > 0) deer++;
+                if (g.Species == Species.Boar && g.AliveCount > 0) boar++;
                 if (g.Species == Species.Wolf && g.AliveCount > 0) wolfPacks++;
             }
-            // New herds wander in; a destroyed pack's territory is retaken after a while.
-            if (clock.Season == Season.Spring && deer < World.Instance.Biome.DeerHerds)
-                SpawnGroup(Species.Deer, Random.Range(3, 5), Tribe.Instance.CampPosition, 120f);
+            // New herds wander in from beyond the valley each spring; a destroyed pack's territory is retaken after a while.
+            if (clock.Season == Season.Spring)
+            {
+                for (int i = 0; i < 2 && deer + i < World.Instance.Biome.DeerHerds; i++)
+                    SpawnGroup(Species.Deer, Random.Range(3, 5), Tribe.Instance.CampPosition, 120f);
+                if (boar < World.Instance.Biome.BoarGroups)
+                    SpawnGroup(Species.Boar, Random.Range(2, 4), Tribe.Instance.CampPosition, 120f);
+            }
             Groups.RemoveAll(g => g.AliveCount == 0 && g.Species == Species.Wolf && Random.value < 0.5f);
             if (wolfPacks < World.Instance.Biome.WolfPacks && Random.value < 0.4f)
             {

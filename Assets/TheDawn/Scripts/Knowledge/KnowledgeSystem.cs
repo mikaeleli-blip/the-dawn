@@ -29,6 +29,7 @@ namespace TheDawn
         public string Description;
         public Era Era;
         public Skill Activity;
+        public Skill? Activity2;   // a second kind of work that also builds insight
         public float Insight;
         public KnowledgeId[] Requires = new KnowledgeId[0];
         public bool Implemented = true;
@@ -51,8 +52,9 @@ namespace TheDawn
             K(KnowledgeId.HideWorking, "Hide Working", "Unlocks Hide Huts and hide cloaks.", Era.Wanderers, Skill.Crafting, 380),
             K(KnowledgeId.FoodDrying, "Food Drying", "Unlocks the Drying Rack. Less food spoils.", Era.Wanderers, Skill.Foraging, 600),
             K(KnowledgeId.HerbalLore, "Herbal Lore", "Wounds and sickness heal faster.", Era.Wanderers, Skill.Foraging, 900),
-            K(KnowledgeId.StoragePits, "Storage Pits", "Unlocks the Storage Pit.", Era.Wanderers, Skill.Building, 260),
-            K(KnowledgeId.Sedentism, "Staying Put", "The idea of living in one place all year. Opens the Settling era.", Era.Wanderers, Skill.Lore, 2600,
+            K2(KnowledgeId.StoragePits, "Storage Pits", "Unlocks the Storage Pit: food keeps longer, even at a camp left empty.", Era.Wanderers, Skill.Foraging, Skill.Building, 1800,
+                KnowledgeId.FoodDrying),
+            K(KnowledgeId.Sedentism, "Staying Put", "The idea of living in one place all year. Grows from stories at the fire, faster each time the band returns to a camp it knows. Lets the band settle for good.", Era.Wanderers, Skill.Lore, 20000,
                 KnowledgeId.FoodDrying, KnowledgeId.StoragePits, KnowledgeId.HideWorking),
 
             K(KnowledgeId.WildGrain, "Wild Grain Gathering", "Harvesting wild grasses for seed.", Era.Settling, Skill.Foraging, 1500, KnowledgeId.Sedentism),
@@ -78,6 +80,13 @@ namespace TheDawn
                 Id = id, Name = name, Description = desc, Era = era, Activity = act, Insight = insight, Requires = req,
                 Implemented = era == Era.Wanderers
             };
+        }
+
+        static KnowledgeDef K2(KnowledgeId id, string name, string desc, Era era, Skill act, Skill act2, float insight, params KnowledgeId[] req)
+        {
+            var d = K(id, name, desc, era, act, insight, req);
+            d.Activity2 = act2;
+            return d;
         }
 
         public static KnowledgeDef Def(KnowledgeId id)
@@ -108,7 +117,7 @@ namespace TheDawn
         {
             status[KnowledgeId.Firemaking] = KnowledgeStatus.Known;
             insight[KnowledgeId.Firemaking] = Def(KnowledgeId.Firemaking).Insight;
-            GameClock.Instance.OnNewDay += () => taughtToday = false;
+            GameClock.Instance.OnNewDay += () => { taughtToday = false; DailyInsight(); };
             Recount();
         }
 
@@ -141,8 +150,9 @@ namespace TheDawn
             if (Tribe.Instance.CountRole(Role.Elder) > 0) amount *= 1.15f;
             foreach (var d in Defs)
             {
-                if (d.Activity != activity || !Researchable(d)) continue;
-                insight[d.Id] += amount;
+                if ((d.Activity != activity && d.Activity2 != activity) || !Researchable(d)) continue;
+                // Staying Put grows mostly from seasons lived at known camps (see DailyInsight); stories add a little.
+                insight[d.Id] += d.Id == KnowledgeId.Sedentism ? amount * 0.3f * Tribe.Instance.FamiliarityMultiplier : amount;
                 if (insight[d.Id] >= d.Insight)
                 {
                     insight[d.Id] = d.Insight;
@@ -159,11 +169,31 @@ namespace TheDawn
             Recount();
             EventLog.Add(re ? p.Name + " has rediscovered " + d.Name + "." : p.Name + " has discovered " + d.Name + "!", LogKind.Good);
             Tribe.Instance.Faith += 4f;
-            if (d.Id == KnowledgeId.Sedentism && CurrentEra == Era.Wanderers)
+            if (d.Id == KnowledgeId.Sedentism && !re)
+                EventLog.Add("The elders talk of staying in one place all year round. Choose a camp and settle for good (Camps panel).", LogKind.Good);
+        }
+
+        /// <summary>Every day the band lives off the land at its camps, the idea of staying grows.</summary>
+        void DailyInsight()
+        {
+            var tribe = Tribe.Instance;
+            var d = Def(KnowledgeId.Sedentism);
+            if (!tribe.HasCamp || tribe.People.Count == 0 || !Researchable(d)) return;
+            insight[d.Id] += 55f * tribe.FamiliarityMultiplier;
+            if (insight[d.Id] >= d.Insight)
             {
-                CurrentEra = Era.Settling;
-                EventLog.Add("A new era begins: Settling & Farming. (Not yet in this build.)", LogKind.Good);
+                insight[d.Id] = d.Insight;
+                Person eldest = null;
+                foreach (var p in tribe.People) if (p.IsAdult && (eldest == null || p.Age > eldest.Age)) eldest = p;
+                if (eldest != null) Discover(d, eldest);
             }
+        }
+
+        public void OnSettled()
+        {
+            if (CurrentEra != Era.Wanderers) return;
+            CurrentEra = Era.Settling;
+            EventLog.Add("The Wanderers era is over. A new era begins: Settling & Farming. (Not yet in this build.)", LogKind.Good);
         }
 
         public void OnPersonDied(Person p)

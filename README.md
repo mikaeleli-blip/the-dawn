@@ -13,6 +13,8 @@ systems right before art goes in.
 
 - A 1 km × 1 km valley with a river, two lakes, forests and hills; clickable minimap
 - A nomadic band of 8 with names, ages, families, skills, traits and needs
+- Seasonal camps: the band moves twice a year; you mark sites and the elders judge them;
+  old camps decay and get repaired on return; discover Staying Put to settle for good
 - People choose their own roles (forager, hunter, gatherer, builder, crafter,
   firekeeper) based on tribe needs, skills and traits
 - Day/night, seasons, temperature; food spoils; winter is harsh
@@ -46,9 +48,11 @@ systems right before art goes in.
 
 ## First goals
 
-1. Place a **Campfire** to found your camp.
+1. Place a **Campfire** to make your first camp.
 2. Build **Lean-tos** so everyone has shelter.
-3. Stock food and wood and **survive the first winter**.
+3. In summer, **mark a winter camp site** (Camps panel): sheltered, with wood and game.
+4. Stock food and wood and **survive the first winter**.
+5. Discover **Staying Put** and settle for good (about 8 game years).
 
 ## Code layout
 
